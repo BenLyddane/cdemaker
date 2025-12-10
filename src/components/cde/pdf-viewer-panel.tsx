@@ -22,6 +22,13 @@ interface BoundingBox {
   height: number; // Normalized 0-1 (height as fraction of page height)
 }
 
+export interface StatusAnnotation {
+  boundingBox: BoundingBox;
+  status: "comply" | "deviate" | "exception" | "pending";
+  specField: string;
+  pageNumber: number;
+}
+
 interface PdfViewerPanelProps {
   pages: PageData[];
   currentPage: number;
@@ -34,6 +41,25 @@ interface PdfViewerPanelProps {
   boundingBox?: BoundingBox;
   selectedComparison?: ComparisonResult;
   highlightedRow?: ExtractedRow;
+  // For showing all CDE annotations on the PDF
+  annotations?: StatusAnnotation[];
+  showAnnotations?: boolean;
+}
+
+// Helper to get status letter and colors
+function getStatusDisplay(status: StatusAnnotation["status"]) {
+  switch (status) {
+    case "comply":
+      return { letter: "C", bgColor: "bg-green-400", borderColor: "border-green-500", textColor: "text-white" };
+    case "deviate":
+      return { letter: "D", bgColor: "bg-yellow-400", borderColor: "border-yellow-500", textColor: "text-neutral-800" };
+    case "exception":
+      return { letter: "E", bgColor: "bg-red-400", borderColor: "border-red-500", textColor: "text-white" };
+    case "pending":
+      return { letter: "?", bgColor: "bg-neutral-400", borderColor: "border-neutral-500", textColor: "text-white" };
+    default:
+      return { letter: "?", bgColor: "bg-neutral-400", borderColor: "border-neutral-500", textColor: "text-white" };
+  }
 }
 
 export function PdfViewerPanel({
@@ -48,6 +74,8 @@ export function PdfViewerPanel({
   boundingBox,
   selectedComparison,
   highlightedRow,
+  annotations = [],
+  showAnnotations = true,
 }: PdfViewerPanelProps) {
   const [zoom, setZoom] = useState(100);
   const [rotation, setRotation] = useState(0);
@@ -384,6 +412,81 @@ export function PdfViewerPanel({
                   <div className="absolute top-2 right-2 bg-bv-blue-400 text-white text-micro px-2 py-1 rounded">
                     Relevant Page
                   </div>
+                </div>
+              )}
+              
+              {/* CDE Status Annotations - C/D/E letters on the PDF */}
+              {showAnnotations && imageRef.current && annotations
+                .filter(a => a.pageNumber === currentPage)
+                .map((annotation, index) => {
+                  const img = imageRef.current!;
+                  const displayedWidth = img.clientWidth;
+                  const displayedHeight = img.clientHeight;
+                  
+                  if (!displayedWidth || !displayedHeight) return null;
+                  
+                  const statusDisplay = getStatusDisplay(annotation.status);
+                  
+                  // Calculate position - place the letter to the right of the bounding box
+                  const boxLeft = annotation.boundingBox.x * displayedWidth;
+                  const boxTop = annotation.boundingBox.y * displayedHeight;
+                  const boxWidth = annotation.boundingBox.width * displayedWidth;
+                  
+                  return (
+                    <div
+                      key={`annotation-${index}`}
+                      className={cn(
+                        "absolute pointer-events-none z-10",
+                        "flex items-center gap-1"
+                      )}
+                      style={{
+                        left: boxLeft + boxWidth + 4, // 4px to the right of the bounding box
+                        top: boxTop,
+                      }}
+                    >
+                      {/* The status letter badge */}
+                      <div
+                        className={cn(
+                          "w-6 h-6 rounded-full flex items-center justify-center",
+                          "font-bold text-sm shadow-md border-2",
+                          statusDisplay.bgColor,
+                          statusDisplay.borderColor,
+                          statusDisplay.textColor
+                        )}
+                        title={`${annotation.specField}: ${annotation.status.toUpperCase()}`}
+                      >
+                        {statusDisplay.letter}
+                      </div>
+                    </div>
+                  );
+                })}
+              
+              {/* CDE Status annotation with bounding box highlight for selected comparison */}
+              {boxPosition && selectedComparison && (
+                <div
+                  className="absolute pointer-events-none z-20"
+                  style={{
+                    left: boxPosition.left + boxPosition.width + 4,
+                    top: boxPosition.top,
+                  }}
+                >
+                  {(() => {
+                    const statusDisplay = getStatusDisplay(selectedComparison.status);
+                    return (
+                      <div
+                        className={cn(
+                          "w-8 h-8 rounded-full flex items-center justify-center",
+                          "font-bold text-lg shadow-lg border-2 animate-bounce",
+                          statusDisplay.bgColor,
+                          statusDisplay.borderColor,
+                          statusDisplay.textColor
+                        )}
+                        title={`${selectedComparison.specField}: ${selectedComparison.status.toUpperCase()}`}
+                      >
+                        {statusDisplay.letter}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>

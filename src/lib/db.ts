@@ -29,24 +29,33 @@ function getSQL() {
 export interface Project {
   id: string;
   name: string;
+  user_id: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export async function createProject(name: string): Promise<Project> {
+export async function createProject(name: string, userId?: string): Promise<Project> {
   const sql = getSQL();
   const result = await sql`
-    INSERT INTO projects (name)
-    VALUES (${name})
+    INSERT INTO projects (name, user_id)
+    VALUES (${name}, ${userId || null})
     RETURNING *
   `;
   return result[0] as Project;
 }
 
-export async function getProjects(): Promise<Project[]> {
+export async function getProjects(userId?: string): Promise<Project[]> {
   const sql = getSQL();
+  if (userId) {
+    const result = await sql`
+      SELECT * FROM projects WHERE user_id = ${userId}
+      ORDER BY created_at DESC
+    `;
+    return result as Project[];
+  }
+  // If no userId, return projects without a user_id (anonymous projects)
   const result = await sql`
-    SELECT * FROM projects
+    SELECT * FROM projects WHERE user_id IS NULL
     ORDER BY created_at DESC
   `;
   return result as Project[];
