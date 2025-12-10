@@ -1,8 +1,6 @@
-import { Suspense } from "react";
-import { CDEWorkspace } from "@/components/cde";
 import { Loader2 } from "lucide-react";
 
-function LoadingFallback() {
+export default function Loading() {
   return (
     <div className="h-screen w-screen flex items-center justify-center bg-neutral-50">
       <div className="flex flex-col items-center gap-4">
@@ -10,13 +8,5 @@ function LoadingFallback() {
         <p className="text-body-sm text-neutral-500">Loading CDE Maker...</p>
       </div>
     </div>
-  );
-}
-
-export default function Home() {
-  return (
-    <Suspense fallback={<LoadingFallback />}>
-      <CDEWorkspace />
-    </Suspense>
   );
 }

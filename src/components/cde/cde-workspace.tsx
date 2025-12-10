@@ -6,8 +6,12 @@ import { PdfViewerPanel } from "./pdf-viewer-panel";
 import { ComparisonPanel } from "./comparison-panel";
 import { ExtractedDataPanel } from "./extracted-data-panel";
 import { Button } from "@/components/ui/button";
-import { FileText, Download, Loader2 } from "lucide-react";
+import { FileText, Download, Loader2, FolderOpen, Save } from "lucide-react";
 import Image from "next/image";
+import { UserMenu } from "@/components/auth/user-menu";
+import { useUser } from "@stackframe/stack";
+import { isStackConfigured } from "@/lib/stack-client";
+import { ProjectsModal } from "@/components/projects/projects-modal";
 import type { ComparisonResult, CDEStatus, ExtractionResult, ExtractedRow } from "@/lib/types";
 import type { PageData } from "@/lib/pdf-utils";
 import { extractPages } from "@/lib/pdf-utils";
@@ -600,6 +604,64 @@ export function CDEWorkspace() {
     return docs;
   }, [specDocuments, submittalDocument]);
   
+  // Auth state - use hook only if Stack is configured
+  const user = isStackConfigured ? useUser() : null;
+  const isSignedIn = Boolean(user);
+  
+  // Project state
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [currentProjectName, setCurrentProjectName] = useState<string | null>(null);
+  const [showProjectsModal, setShowProjectsModal] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  
+  // Check if there's any work to save
+  const hasWorkToSave = specDocuments.length > 0 || comparisons.length > 0;
+  
+  // Save project function
+  const handleSaveProject = useCallback(async () => {
+    if (!user) return;
+    
+    const projectName = currentProjectName || prompt("Enter a name for this project:");
+    if (!projectName) return;
+    
+    setIsSaving(true);
+    
+    try {
+      // Create or update project
+      const response = await fetch("/api/projects", {
+        method: currentProjectId ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: currentProjectId,
+          name: projectName,
+          userId: user.id,
+          // We'll store project state metadata
+          state: {
+            specDocumentCount: specDocuments.length,
+            hasSubmittal: !!submittalDocument,
+            comparisonCount: comparisons.length,
+            extractedRowCount: allExtractedRows.length,
+            summary: summary,
+            workflowPhase: determineWorkflowPhase(),
+          },
+        }),
+      });
+      
+      if (!response.ok) throw new Error("Failed to save project");
+      
+      const result = await response.json();
+      setCurrentProjectId(result.data.id);
+      setCurrentProjectName(projectName);
+      
+      alert("Project saved successfully!");
+    } catch (error) {
+      console.error("Save error:", error);
+      alert("Failed to save project. Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [user, currentProjectId, currentProjectName, specDocuments, submittalDocument, comparisons, allExtractedRows, summary, determineWorkflowPhase]);
+  
   return (
     <div className="flex flex-col h-screen bg-neutral-50">
       {/* Header */}
@@ -611,6 +673,39 @@ export function CDEWorkspace() {
         </div>
         
         <div className="flex items-center gap-3">
+          {/* Projects button - only visible when signed in */}
+          {isSignedIn && (
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="gap-2"
+              onClick={() => setShowProjectsModal(true)}
+            >
+              <FolderOpen className="h-4 w-4" />
+              My Projects
+            </Button>
+          )}
+          
+          {/* Save button - only visible when signed in and has work */}
+          {isSignedIn && hasWorkToSave && (
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="gap-2"
+              onClick={handleSaveProject}
+              disabled={isSaving}
+            >
+              {isSaving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
+              {currentProjectId ? "Save" : "Save Project"}
+            </Button>
+          )}
+          
+          <div className="h-6 w-px bg-neutral-200" />
+          
           <Button variant="outline" size="sm" disabled={!canGeneratePdf} className="gap-2">
             <FileText className="h-4 w-4" />
             Preview Report
@@ -619,6 +714,11 @@ export function CDEWorkspace() {
             {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             Generate PDF
           </Button>
+          
+          <div className="h-6 w-px bg-neutral-200" />
+          
+          {/* Auth - always visible */}
+          <UserMenu />
         </div>
       </header>
       
@@ -693,6 +793,21 @@ export function CDEWorkspace() {
           </div>
         </main>
       </div>
+      
+      {/* Projects Modal */}
+      {isSignedIn && user && (
+        <ProjectsModal
+          isOpen={showProjectsModal}
+          onClose={() => setShowProjectsModal(false)}
+          onLoadProject={(projectId) => {
+            // TODO: Implement full project loading
+            // For now, just set the project ID and show a message
+            setCurrentProjectId(projectId);
+            alert("Project loaded! Full state restoration coming soon.");
+          }}
+          userId={user.id}
+        />
+      )}
     </div>
   );
 }
