@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { toast } from "sonner";
 import { Sidebar } from "./sidebar";
 import { DualPdfViewer } from "./dual-pdf-viewer";
 import { ComparisonPanel } from "./comparison-panel";
@@ -522,14 +523,14 @@ export function CDEWorkspace() {
         itemCount: pages.length,
       });
       
-      // If there are already extracted rows and we're still extracting, queue them for AI CDE
+      // If there are already extracted rows, queue them for AI CDE
       // This handles the case where user uploads submittal while spec is being extracted
-      // The rows will be processed by the queue processor
-      // Note: We don't queue here because the page_complete handler will queue new rows
-      // For existing rows that were extracted before submittal was uploaded, we queue them now
+      // Note: We access documentExtractions via a ref-like pattern to avoid stale closure
+      // Calculate rows to queue BEFORE any setState, then queue after
+      const rowsToQueue: { rows: ExtractedRow[]; docId: string }[] = [];
+      
+      // Use a callback to get the current state and calculate what needs queuing
       setDocumentExtractions(prev => {
-        const rowsToQueue: { rows: ExtractedRow[]; docId: string }[] = [];
-        
         for (const [docId, extraction] of prev.entries()) {
           // Only queue rows that don't have AI CDE results yet
           const unprocessedRows = extraction.rows.filter(r => !r.cdeStatus && !r.isAiProcessing);
@@ -537,16 +538,19 @@ export function CDEWorkspace() {
             rowsToQueue.push({ rows: unprocessedRows, docId });
           }
         }
-        
-        // Queue rows outside of setState to avoid issues
-        setTimeout(() => {
+        return prev; // Return unchanged - we're just reading
+      });
+      
+      // Queue rows after state is read (using setTimeout to ensure state update completes)
+      // This is needed because we need the rows data from the state read above
+      if (rowsToQueue.length > 0) {
+        // Use queueMicrotask for cleaner async handling than setTimeout
+        queueMicrotask(() => {
           for (const { rows, docId } of rowsToQueue) {
             queueRowsForAiCde(rows, docId);
           }
-        }, 100);
-        
-        return prev;
-      });
+        });
+      }
       
     } catch (error) {
       console.error("Submittal processing error:", error);
@@ -882,8 +886,9 @@ export function CDEWorkspace() {
     return docs;
   }, [specDocuments, submittalDocument]);
   
-  // Auth state - use hook only if Stack is configured
-  const user = isStackConfigured ? useUser() : null;
+  // Auth state - always call hook (React Rules of Hooks requirement), then conditionally use result
+  const stackUser = useUser();
+  const user = isStackConfigured ? stackUser : null;
   const isSignedIn = Boolean(user);
   
   // Project state
@@ -940,9 +945,15 @@ export function CDEWorkspace() {
       const filename = `${(currentProjectName || "cde-report").replace(/\s+/g, '-')}-${new Date().toISOString().split('T')[0]}.pdf`;
       downloadPdf(pdfBlob, filename);
       
+      toast.success("PDF generated successfully", {
+        description: `Downloaded: ${filename}`,
+      });
+      
     } catch (error) {
       console.error("PDF generation error:", error);
-      alert("Failed to generate PDF. Please try again.");
+      toast.error("Failed to generate PDF", {
+        description: "Please try again or contact support if the issue persists.",
+      });
     } finally {
       setIsGeneratingPdf(false);
     }
@@ -1089,18 +1100,14 @@ export function CDEWorkspace() {
           
           <div className="h-6 w-px bg-neutral-200" />
           
-          <Button variant="outline" size="sm" disabled={!canGeneratePdf || isGeneratingPdf} className="gap-2">
-            <FileText className="h-4 w-4" />
-            Preview Report
-          </Button>
           <Button 
             size="sm" 
             disabled={!canGeneratePdf || isGeneratingPdf} 
             className="gap-2 bg-bv-blue-400 hover:bg-bv-blue-500"
             onClick={handleGeneratePdf}
           >
-            {isGeneratingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            {isGeneratingPdf ? "Generating..." : "Generate PDF"}
+            {isGeneratingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+            {isGeneratingPdf ? "Generating..." : "Generate Report"}
           </Button>
           
           <div className="h-6 w-px bg-neutral-200" />
@@ -1208,7 +1215,9 @@ export function CDEWorkspace() {
             // TODO: Implement full project loading
             // For now, just set the project ID and show a message
             setCurrentProjectId(projectId);
-            alert("Project loaded! Full state restoration coming soon.");
+            toast.info("Project loaded", {
+              description: "Full state restoration coming soon.",
+            });
           }}
           userId={user.id}
         />

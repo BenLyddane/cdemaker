@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,7 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
+import { toast } from "sonner";
 import { 
   Search, 
   ChevronDown,
@@ -31,6 +32,9 @@ import {
   User,
   Loader2,
   Pause,
+  Upload,
+  ArrowRight,
+  Keyboard,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ExtractedRow, CDEStatus } from "@/lib/types";
@@ -691,19 +695,130 @@ export function ExtractedDataPanel({
     ? Math.round((extractionProgress.currentPage / extractionProgress.totalPages) * 100)
     : 0;
   
+  // Keyboard shortcuts for quick status changes
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only trigger if we have a selected row and onStatusChange is available
+      if (!selectedRowId || !onStatusChange) return;
+      
+      // Don't trigger if user is typing in an input
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+      
+      const selectedRow = rows.find(r => r.id === selectedRowId);
+      if (!selectedRow) return;
+      
+      let newStatus: CDEStatus | null = null;
+      
+      switch (e.key.toLowerCase()) {
+        case "c":
+          newStatus = "comply";
+          break;
+        case "d":
+          newStatus = "deviate";
+          break;
+        case "e":
+          newStatus = "exception";
+          break;
+        case "a":
+          // Accept AI decision if available
+          if (selectedRow.cdeSource === "ai" && !selectedRow.isReviewed && onAcceptAiDecision) {
+            e.preventDefault();
+            onAcceptAiDecision(selectedRowId);
+            toast.success("AI decision accepted", {
+              description: `Marked "${selectedRow.field}" as reviewed`,
+            });
+          }
+          return;
+        case "arrowdown":
+          // Navigate to next row
+          e.preventDefault();
+          const currentIndex = filteredRows.findIndex(r => r.id === selectedRowId);
+          if (currentIndex < filteredRows.length - 1) {
+            onRowSelect(filteredRows[currentIndex + 1]);
+          }
+          return;
+        case "arrowup":
+          // Navigate to previous row
+          e.preventDefault();
+          const prevIndex = filteredRows.findIndex(r => r.id === selectedRowId);
+          if (prevIndex > 0) {
+            onRowSelect(filteredRows[prevIndex - 1]);
+          }
+          return;
+        default:
+          return;
+      }
+      
+      if (newStatus) {
+        e.preventDefault();
+        onStatusChange(selectedRowId, newStatus);
+        toast.success(`Status set to ${newStatus}`, {
+          description: `"${selectedRow.field.slice(0, 30)}${selectedRow.field.length > 30 ? '...' : ''}"`,
+        });
+      }
+    };
+    
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedRowId, onStatusChange, onAcceptAiDecision, rows, filteredRows, onRowSelect]);
+  
   // Empty state (but not loading)
   if (rows.length === 0 && !isLoading) {
     return (
       <div className="h-full flex flex-col bg-white">
         <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <div className="w-16 h-16 rounded-full bg-neutral-100 flex items-center justify-center mx-auto mb-4">
-              <FileText className="h-8 w-8 text-neutral-400" />
+          <div className="max-w-xl mx-auto">
+            {/* Workflow guide */}
+            <div className="flex items-center justify-center gap-4 mb-8">
+              <div className="flex flex-col items-center">
+                <div className="w-12 h-12 rounded-full bg-bv-blue-100 flex items-center justify-center mb-2 border-2 border-bv-blue-400">
+                  <Upload className="h-5 w-5 text-bv-blue-600" />
+                </div>
+                <span className="text-detail font-medium text-bv-blue-700">1. Upload</span>
+                <span className="text-micro text-neutral-500">Spec / Schedule</span>
+              </div>
+              
+              <ArrowRight className="h-5 w-5 text-neutral-300 mt-[-20px]" />
+              
+              <div className="flex flex-col items-center">
+                <div className="w-12 h-12 rounded-full bg-neutral-100 flex items-center justify-center mb-2 border-2 border-neutral-300">
+                  <FileText className="h-5 w-5 text-neutral-400" />
+                </div>
+                <span className="text-detail font-medium text-neutral-500">2. Review</span>
+                <span className="text-micro text-neutral-400">Extracted Data</span>
+              </div>
+              
+              <ArrowRight className="h-5 w-5 text-neutral-300 mt-[-20px]" />
+              
+              <div className="flex flex-col items-center">
+                <div className="w-12 h-12 rounded-full bg-neutral-100 flex items-center justify-center mb-2 border-2 border-neutral-300">
+                  <CheckCircle2 className="h-5 w-5 text-neutral-400" />
+                </div>
+                <span className="text-detail font-medium text-neutral-500">3. Mark CDE</span>
+                <span className="text-micro text-neutral-400">C / D / E Status</span>
+              </div>
             </div>
-            <p className="text-body-sm text-neutral-600">No extracted data yet</p>
-            <p className="text-detail text-neutral-400">
-              Upload a specification or schedule to extract data
-            </p>
+            
+            <div className="text-center">
+              <p className="text-body-sm font-medium text-neutral-700 mb-2">
+                Ready to start your CDE review
+              </p>
+              <p className="text-detail text-neutral-500 mb-6">
+                Upload a specification or schedule document in the sidebar to begin extracting requirements.
+              </p>
+              
+              {/* Keyboard shortcut hints */}
+              <div className="inline-flex items-center gap-2 px-4 py-2 bg-neutral-50 rounded-lg border border-neutral-200">
+                <Keyboard className="h-4 w-4 text-neutral-400" />
+                <span className="text-micro text-neutral-500">
+                  Tip: Use <kbd className="px-1.5 py-0.5 bg-white rounded border text-micro font-mono">C</kbd>
+                  <kbd className="px-1.5 py-0.5 bg-white rounded border text-micro font-mono">D</kbd>
+                  <kbd className="px-1.5 py-0.5 bg-white rounded border text-micro font-mono">E</kbd> 
+                  keys for quick status changes
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -744,9 +859,20 @@ export function ExtractedDataPanel({
                 )}
               </div>
             ) : (
-              <p className="text-micro text-neutral-500">
-                Hover over a row to see its location in the document
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="text-micro text-neutral-500">
+                  {selectedRowId 
+                    ? "Use keyboard: C=Comply, D=Deviate, E=Exception, ↑↓=Navigate"
+                    : "Click a row to select, hover to preview in PDF"
+                  }
+                </p>
+                {selectedRowId && (
+                  <Badge variant="outline" className="text-micro bg-bv-blue-50 text-bv-blue-600 border-bv-blue-300 gap-1">
+                    <Keyboard className="h-3 w-3" />
+                    Shortcuts active
+                  </Badge>
+                )}
+              </div>
             )}
           </div>
           <div className="flex items-center gap-2 text-micro">

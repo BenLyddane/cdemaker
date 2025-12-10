@@ -29,19 +29,6 @@ export function fileToBase64(file: File): Promise<string> {
 }
 
 /**
- * Convert ArrayBuffer to base64
- */
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
-/**
  * Extract pages from a PDF file using pdf.js
  * Renders each page to a canvas and exports as PNG
  */

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { GoogleGenerativeAI, Part } from "@google/generative-ai";
+import type { ExtractedRow } from "@/lib/types";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY || "");
 const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
@@ -11,28 +12,6 @@ interface PageInput {
   base64: string;
   mimeType: string;
   pageNumber: number;
-}
-
-interface ExtractedRow {
-  id: string;
-  field: string;
-  value: string;
-  unit?: string;
-  section?: string;
-  specNumber?: string;
-  confidence: "high" | "medium" | "low";
-  pageNumber: number;
-  rawText?: string;
-  location?: {
-    pageNumber: number;
-    boundingBox?: {
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-    };
-    textSnippet?: string;
-  };
 }
 
 type DocumentType = "specification" | "schedule" | "submittal" | "unknown";

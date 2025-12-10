@@ -1,4 +1,15 @@
 import { GoogleGenerativeAI, Part } from "@google/generative-ai";
+import type { 
+  ExtractedRow, 
+  ExtractionResult, 
+  PageExtractionResult, 
+  ExtractionProgress 
+} from "./types";
+
+// Re-export types for backwards compatibility
+export type { ExtractedRow, PageExtractionResult, ExtractionProgress };
+// Alias ExtractionResult as ExtractedData for backwards compatibility
+export type ExtractedData = ExtractionResult;
 
 // Initialize the Gemini API client
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY || "");
@@ -10,63 +21,6 @@ const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
 const MAX_CONCURRENT_REQUESTS = 5;
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
-
-export interface ExtractedRow {
-  id: string;
-  field: string;
-  value: string;
-  unit?: string;
-  section?: string;
-  specNumber?: string;
-  confidence: "high" | "medium" | "low";
-  pageNumber: number;
-  rawText?: string;
-  location?: {
-    pageNumber: number;
-    boundingBox?: {
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-    };
-    textSnippet?: string;
-  };
-}
-
-export interface ExtractedData {
-  rows: ExtractedRow[];
-  metadata: {
-    documentType: "specification" | "schedule" | "submittal" | "unknown";
-    totalRows: number;
-    totalPages: number;
-    extractedAt: string;
-    processingTime: number;
-    manufacturer?: string;
-    model?: string;
-  };
-  pageResults: PageExtractionResult[];
-}
-
-export interface PageExtractionResult {
-  pageNumber: number;
-  status: "success" | "failed" | "pending";
-  rows: ExtractedRow[];
-  error?: string;
-  retryCount: number;
-  rawResponse?: string;
-}
-
-export interface ExtractionProgress {
-  totalPages: number;
-  completedPages: number;
-  currentPage: number;
-  status: "processing" | "completed" | "failed";
-  pageStatuses: Array<{
-    page: number;
-    status: "pending" | "processing" | "success" | "failed" | "retrying";
-    retryCount: number;
-  }>;
-}
 
 /**
  * Convert a file to a generative AI part

@@ -357,8 +357,9 @@ async function addAnnotatedPage(
       const boxW = bbox.width * imgDisplayWidth;
       const boxH = bbox.height * imgDisplayHeight;
       
-      // Get status color
-      const status = row.cdeStatus || "pending";
+      // Get status color with defensive check
+      const rawStatus = row.cdeStatus;
+      const status = (rawStatus && STATUS_CONFIG[rawStatus]) ? rawStatus : "pending";
       const statusConfig = STATUS_CONFIG[status];
       
       // Draw bounding box
@@ -411,7 +412,9 @@ async function addAnnotatedPage(
       return;
     }
     
-    const status = row.cdeStatus || "pending";
+    // Get status color with defensive check
+    const rawStatus = row.cdeStatus;
+    const status = (rawStatus && STATUS_CONFIG[rawStatus]) ? rawStatus : "pending";
     const statusConfig = STATUS_CONFIG[status];
     
     // Item number and status badge

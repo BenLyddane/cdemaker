@@ -437,20 +437,13 @@ export async function updateComparison(
 ): Promise<ComparisonDB | null> {
   const sql = getSQL();
 
-  const updates: string[] = [];
-  if (data.status !== undefined) updates.push(`status = '${data.status}'`);
-  if (data.userComment !== undefined)
-    updates.push(`user_comment = '${data.userComment}'`);
-  if (data.isReviewed !== undefined) {
-    updates.push(`is_reviewed = ${data.isReviewed}`);
-    if (data.isReviewed) {
-      updates.push(`reviewed_at = NOW()`);
-    }
-  }
-  if (data.reviewedBy !== undefined)
-    updates.push(`reviewed_by = '${data.reviewedBy}'`);
-
-  if (updates.length === 0) return null;
+  // Check if there's anything to update
+  const hasUpdates = data.status !== undefined || 
+                     data.userComment !== undefined || 
+                     data.isReviewed !== undefined || 
+                     data.reviewedBy !== undefined;
+  
+  if (!hasUpdates) return null;
 
   const result = await sql`
     UPDATE comparisons

@@ -240,10 +240,11 @@ export function useAutosave(options: AutosaveOptions = {}) {
       try {
         setState(prev => ({ ...prev, status: "saving" }));
         
-        const response = await fetch(`/api/extractions/rows/${rowId}`, {
+        // Use the correct PATCH endpoint with rowId in body
+        const response = await fetch(`/api/extractions`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(updates),
+          body: JSON.stringify({ rowId, updates }),
         });
         
         if (!response.ok) {
@@ -328,7 +329,8 @@ export function useAutosave(options: AutosaveOptions = {}) {
   // Restore a project
   const restoreProject = useCallback(async (projectId: string): Promise<boolean> => {
     try {
-      const response = await fetch(`/api/projects/${projectId}/state`);
+      // Use the existing GET endpoint with id query param
+      const response = await fetch(`/api/projects?id=${projectId}`);
       
       if (!response.ok) {
         // Project may have been deleted

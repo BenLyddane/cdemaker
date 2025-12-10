@@ -3,7 +3,8 @@ import { GoogleGenerativeAI, Part } from "@google/generative-ai";
 import type { ExtractedRow, CDEStatus, DocumentLocation } from "@/lib/types";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY || "");
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+// Using gemini-3-pro-preview for better bounding box accuracy (same as extract route)
+const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 500;
@@ -58,7 +59,12 @@ COMPLIANCE STATUS:
 - "deviate": Values differ slightly, may be acceptable with engineering review
 - "exception": Values incompatible, missing, or wrong direction
 
-BOUNDING BOX: If you find the relevant data in the submittal, provide normalized coordinates (0-1) for where it appears.
+CRITICAL - BOUNDING BOX REQUIREMENT:
+You MUST provide a bounding box when you find data in the submittal. The bounding box should surround the specific value/text you found.
+- x: normalized distance from LEFT edge (0 = left edge, 1 = right edge)
+- y: normalized distance from TOP edge (0 = top edge, 1 = bottom edge)
+- width/height: normalized size of the box
+Estimate coordinates based on where the value appears in the page image. Be precise!
 
 RESPOND WITH STRICT JSON:
 {
@@ -68,13 +74,15 @@ RESPOND WITH STRICT JSON:
   "submittalValue": "<actual value found in submittal, or null>",
   "submittalUnit": "<unit from submittal if different from spec, or null>",
   "boundingBox": {
-    "x": <normalized x coordinate 0-1 of left edge>,
-    "y": <normalized y coordinate 0-1 of top edge>,
-    "width": <normalized width 0-1>,
-    "height": <normalized height 0-1>
-  } or null if not found,
+    "x": <float 0-1>,
+    "y": <float 0-1>,
+    "width": <float 0-1>,
+    "height": <float 0-1>
+  },
   "explanation": "Brief explanation (max 20 words). State values and result."
-}`;
+}
+
+NOTE: boundingBox is REQUIRED when foundOnPage is not null. Always provide coordinates!`;
 
     // Create image parts from submittal pages (limit to first 8 pages for single item)
     const pagesToSend = submittalPages.slice(0, 8);
