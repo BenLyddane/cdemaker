@@ -1,26 +1,255 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  /* Font */
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  
+  /* Colors mapped to CSS variables */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  
+  /* BuildVision Custom Colors */
+  --color-bv-blue-100: #E9EEFF;
+  --color-bv-blue-200: #ABBBFF;
+  --color-bv-blue-300: #7383FF;
+  --color-bv-blue-400: #4A3AFF;
+  --color-bv-blue-500: #3F31DE;
+  --color-bv-blue-600: #3528BE;
+  --color-bv-blue-700: #201B80;
+  --color-bv-blue-800: #171063;
+  --color-bv-blue-900: #06042E;
+  --color-bv-blue: #4A3AFF;
+  
+  --color-neutral-50: #F8F8F8;
+  --color-neutral-100: #EDEDED;
+  --color-neutral-200: #C9CBCF;
+  --color-neutral-300: #AEB0B7;
+  --color-neutral-400: #9E9EA5;
+  --color-neutral-500: #8C8C92;
+  --color-neutral-600: #6C6C71;
+  --color-neutral-700: #535257;
+  --color-neutral-800: #2A2A2F;
+  --color-neutral-900: #18191B;
+  
+  --color-success-100: #B2FFDA;
+  --color-success-400: #16DA7C;
+  --color-success-700: #0B864B;
+  --color-success: #16DA7C;
+  
+  --color-warning-100: #FFECAA;
+  --color-warning-400: #FFCC17;
+  --color-warning-700: #CC9300;
+  --color-warning: #FFCC17;
+  
+  --color-error-100: #FFDADA;
+  --color-error-400: #EC4343;
+  --color-error-700: #C85E3C;
+  --color-error: #EC4343;
+  
+  --color-purple-100: #F3E8FF;
+  --color-purple-400: #CC98F6;
+  --color-purple-700: #6B21A8;
+  
+  /* Typography Scale */
+  --text-h1: 64px;
+  --text-h1--line-height: 88px;
+  --text-h2: 56px;
+  --text-h2--line-height: 72px;
+  --text-h3: 48px;
+  --text-h3--line-height: 56px;
+  --text-h4: 36px;
+  --text-h4--line-height: 48px;
+  --text-h5: 24px;
+  --text-h5--line-height: 32px;
+  --text-body-lg: 24px;
+  --text-body-lg--line-height: 38px;
+  --text-body-md: 18px;
+  --text-body-md--line-height: 28px;
+  --text-body-sm: 16px;
+  --text-body-sm--line-height: 22px;
+  --text-detail: 14px;
+  --text-detail--line-height: 18px;
+  --text-micro: 12px;
+  --text-micro--line-height: 16px;
+  
+  /* Border Radius */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+:root {
+  --radius: 0.5rem;
+  
+  /* BuildVision Light Theme */
+  --background: #FFFFFF;
+  --foreground: #2A2A2F;
+  
+  --card: #F8F8F8;
+  --card-foreground: #2A2A2F;
+  
+  --popover: #FFFFFF;
+  --popover-foreground: #2A2A2F;
+  
+  --primary: #4A3AFF;
+  --primary-foreground: #FFFFFF;
+  
+  --secondary: #F8F8F8;
+  --secondary-foreground: #2A2A2F;
+  
+  --muted: #EDEDED;
+  --muted-foreground: #6C6C71;
+  
+  --accent: #E9EEFF;
+  --accent-foreground: #4A3AFF;
+  
+  --destructive: #EC4343;
+  
+  --border: #C9CBCF;
+  --input: #C9CBCF;
+  --ring: #4A3AFF;
+  
+  /* Chart colors */
+  --chart-1: #4A3AFF;
+  --chart-2: #16DA7C;
+  --chart-3: #FFCC17;
+  --chart-4: #CC98F6;
+  --chart-5: #EC4343;
+}
+
+.dark {
+  /* BuildVision Dark Theme */
+  --background: #18191B;
+  --foreground: #F8F8F8;
+  
+  --card: #2A2A2F;
+  --card-foreground: #F8F8F8;
+  
+  --popover: #2A2A2F;
+  --popover-foreground: #F8F8F8;
+  
+  --primary: #7383FF;
+  --primary-foreground: #FFFFFF;
+  
+  --secondary: #535257;
+  --secondary-foreground: #F8F8F8;
+  
+  --muted: #535257;
+  --muted-foreground: #AEB0B7;
+  
+  --accent: #201B80;
+  --accent-foreground: #ABBBFF;
+  
+  --destructive: #EC4343;
+  
+  --border: #535257;
+  --input: #535257;
+  --ring: #7383FF;
+  
+  /* Chart colors */
+  --chart-1: #7383FF;
+  --chart-2: #16DA7C;
+  --chart-3: #FFCC17;
+  --chart-4: #CC98F6;
+  --chart-5: #EC4343;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  
+  /* Typography utilities */
+  h1 {
+    font-size: 64px;
+    line-height: 88px;
+    color: #2A2A2F;
+  }
+  h2 {
+    font-size: 56px;
+    line-height: 72px;
+    color: #2A2A2F;
+  }
+  h3 {
+    font-size: 48px;
+    line-height: 56px;
+    color: #2A2A2F;
+  }
+  h4 {
+    font-size: 36px;
+    line-height: 48px;
+    color: #2A2A2F;
+  }
+  h5 {
+    font-size: 24px;
+    line-height: 32px;
+    color: #2A2A2F;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Custom utility classes */
+@layer utilities {
+  .text-h1 {
+    font-size: 64px;
+    line-height: 88px;
+  }
+  .text-h2 {
+    font-size: 56px;
+    line-height: 72px;
+  }
+  .text-h3 {
+    font-size: 48px;
+    line-height: 56px;
+  }
+  .text-h4 {
+    font-size: 36px;
+    line-height: 48px;
+  }
+  .text-h5 {
+    font-size: 24px;
+    line-height: 32px;
+  }
+  .text-body-lg {
+    font-size: 24px;
+    line-height: 38px;
+  }
+  .text-body-md {
+    font-size: 18px;
+    line-height: 28px;
+  }
+  .text-body-sm {
+    font-size: 16px;
+    line-height: 22px;
+  }
+  .text-detail {
+    font-size: 14px;
+    line-height: 18px;
+  }
+  .text-micro {
+    font-size: 12px;
+    line-height: 16px;
+  }
 }
