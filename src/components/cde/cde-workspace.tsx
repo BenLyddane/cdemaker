@@ -2,11 +2,11 @@
 
 import { useState, useCallback, useMemo, useRef } from "react";
 import { Sidebar } from "./sidebar";
-import { PdfViewerPanel } from "./pdf-viewer-panel";
+import { DualPdfViewer } from "./dual-pdf-viewer";
 import { ComparisonPanel } from "./comparison-panel";
 import { ExtractedDataPanel } from "./extracted-data-panel";
 import { Button } from "@/components/ui/button";
-import { FileText, Download, Loader2, FolderOpen, Save, Check, X } from "lucide-react";
+import { FileText, Download, Loader2, FolderOpen, Save, Check, X, Pause, Play } from "lucide-react";
 import Image from "next/image";
 import { UserMenu } from "@/components/auth/user-menu";
 import { useUser } from "@stackframe/stack";
@@ -15,6 +15,7 @@ import { ProjectsModal } from "@/components/projects/projects-modal";
 import type { ComparisonResult, CDEStatus, ExtractionResult, ExtractedRow } from "@/lib/types";
 import type { PageData } from "@/lib/pdf-utils";
 import { extractPages } from "@/lib/pdf-utils";
+import { generateCDEPdf, downloadPdf } from "@/lib/pdf-generator";
 import type { UploadedDocument, DocumentType } from "./document-list";
 
 // Stream event types from API
@@ -70,7 +71,9 @@ export function CDEWorkspace() {
   
   // Extraction progress state
   const [extractionProgress, setExtractionProgress] = useState<ExtractionProgress | null>(null);
+  const [isPaused, setIsPaused] = useState(false);
   const extractionAbortRef = useRef<AbortController | null>(null);
+  const pausedDocRef = useRef<{ doc: UploadedDocument; lastPage: number } | null>(null);
   
   // AI CDE processing queue
   const aiCdeQueueRef = useRef<ExtractedRow[]>([]);
@@ -80,10 +83,13 @@ export function CDEWorkspace() {
   // View state
   const [viewingDocId, setViewingDocId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [submittalCurrentPage, setSubmittalCurrentPage] = useState(1);
   const [selectedComparison, setSelectedComparison] = useState<string | null>(null);
   const [hoveredExtractedRow, setHoveredExtractedRow] = useState<ExtractedRow | null>(null);
   const [selectedExtractedRow, setSelectedExtractedRow] = useState<ExtractedRow | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [splitView, setSplitView] = useState(true); // Default to split view when submittal exists
+  const [viewingDocument, setViewingDocument] = useState<"spec" | "submittal">("spec");
   
   // Generate unique ID
   const generateId = () => Math.random().toString(36).substring(2, 9);
@@ -625,8 +631,13 @@ export function CDEWorkspace() {
           if (viewingDocId !== doc.id) {
             setViewingDocId(doc.id);
           }
-          // Navigate to the page
+          // Navigate spec viewer to the page
           setCurrentPage(row.pageNumber);
+          
+          // Also navigate submittal viewer if row has submittal location
+          if (row.submittalLocation?.pageNumber) {
+            setSubmittalCurrentPage(row.submittalLocation.pageNumber);
+          }
           break;
         }
       }
@@ -641,7 +652,13 @@ export function CDEWorkspace() {
       const extraction = documentExtractions.get(doc.id);
       if (extraction?.rows.some(r => r.id === row.id)) {
         setViewingDocId(doc.id);
+        // Navigate spec viewer to the page
         setCurrentPage(row.pageNumber);
+        
+        // Also navigate submittal viewer if row has submittal location
+        if (row.submittalLocation?.pageNumber) {
+          setSubmittalCurrentPage(row.submittalLocation.pageNumber);
+        }
         break;
       }
     }
@@ -853,8 +870,8 @@ export function CDEWorkspace() {
   // Use extracted rows summary if no AI comparison done, otherwise use comparison summary
   const displaySummary = comparisons.length > 0 ? summary : extractedRowsSummary;
   
-  // Can generate PDF if any rows have been reviewed
-  const canGeneratePdf = (extractedRowsSummary.reviewed > 0 || comparisons.length > 0) && !isProcessing;
+  // Can generate PDF if any extracted rows exist (don't require review)
+  const canGeneratePdf = allExtractedRows.length > 0;
   
   // Combine all documents for sidebar display
   const allDocuments = useMemo(() => {
@@ -882,6 +899,89 @@ export function CDEWorkspace() {
   // Clear save message after delay
   const clearSaveMessage = useCallback(() => {
     setTimeout(() => setSaveMessage(null), 3000);
+  }, []);
+  
+  // PDF generation state
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  
+  // Generate PDF handler
+  const handleGeneratePdf = useCallback(async () => {
+    if (allExtractedRows.length === 0) return;
+    
+    setIsGeneratingPdf(true);
+    
+    try {
+      // Get spec pages
+      const specPages: PageData[] = [];
+      specDocuments.forEach(doc => {
+        const pages = documentPages.get(doc.id);
+        if (pages) {
+          specPages.push(...pages);
+        }
+      });
+      
+      // Get submittal pages
+      const submittalPagesList: PageData[] = submittalDocument 
+        ? documentPages.get(submittalDocument.id) || []
+        : [];
+      
+      // Generate the PDF
+      const pdfBlob = await generateCDEPdf(
+        specPages,
+        submittalPagesList,
+        allExtractedRows,
+        {
+          projectName: currentProjectName || "CDE Report",
+          includeUnreviewed: true,
+        }
+      );
+      
+      // Trigger download
+      const filename = `${(currentProjectName || "cde-report").replace(/\s+/g, '-')}-${new Date().toISOString().split('T')[0]}.pdf`;
+      downloadPdf(pdfBlob, filename);
+      
+    } catch (error) {
+      console.error("PDF generation error:", error);
+      alert("Failed to generate PDF. Please try again.");
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  }, [allExtractedRows, specDocuments, documentPages, submittalDocument, currentProjectName]);
+  
+  // Pause extraction handler
+  const handlePauseExtraction = useCallback(() => {
+    if (extractionAbortRef.current && isExtracting) {
+      // Store current progress for potential resume
+      const currentDoc = specDocuments.find(d => d.status === "extracting");
+      if (currentDoc && extractionProgress) {
+        pausedDocRef.current = {
+          doc: currentDoc,
+          lastPage: extractionProgress.currentPage,
+        };
+      }
+      
+      // Abort the extraction
+      extractionAbortRef.current.abort();
+      setIsPaused(true);
+      setIsExtracting(false);
+      
+      // Update document status to paused
+      if (currentDoc) {
+        setSpecDocuments(prev => prev.map(d => 
+          d.id === currentDoc.id ? { ...d, status: "complete" as const } : d
+        ));
+      }
+      
+      addLog("Extraction paused - data saved", "warning");
+      setWorkflowPhase("reviewing");
+    }
+  }, [isExtracting, specDocuments, extractionProgress, addLog]);
+  
+  // Resume extraction handler (note: full resume requires backend support for page-based extraction)
+  const handleResumeExtraction = useCallback(() => {
+    // For now, just clear the paused state - full resume would require backend changes
+    setIsPaused(false);
+    pausedDocRef.current = null;
   }, []);
   
   // Save project function
@@ -989,13 +1089,18 @@ export function CDEWorkspace() {
           
           <div className="h-6 w-px bg-neutral-200" />
           
-          <Button variant="outline" size="sm" disabled={!canGeneratePdf} className="gap-2">
+          <Button variant="outline" size="sm" disabled={!canGeneratePdf || isGeneratingPdf} className="gap-2">
             <FileText className="h-4 w-4" />
             Preview Report
           </Button>
-          <Button size="sm" disabled={!canGeneratePdf} className="gap-2 bg-bv-blue-400 hover:bg-bv-blue-500">
-            {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            Generate PDF
+          <Button 
+            size="sm" 
+            disabled={!canGeneratePdf || isGeneratingPdf} 
+            className="gap-2 bg-bv-blue-400 hover:bg-bv-blue-500"
+            onClick={handleGeneratePdf}
+          >
+            {isGeneratingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {isGeneratingPdf ? "Generating..." : "Generate PDF"}
           </Button>
           
           <div className="h-6 w-px bg-neutral-200" />
@@ -1028,24 +1133,35 @@ export function CDEWorkspace() {
         
         <main className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 min-h-0">
-            <PdfViewerPanel
-              pages={currentPages}
-              currentPage={currentPage}
-              totalPages={totalPages}
-              onPageChange={setCurrentPage}
-              viewingDocument={viewingDocId && submittalDocument?.id === viewingDocId ? "submittal" : "spec"}
-              onDocumentChange={(doc) => {
-                if (doc === "submittal" && submittalDocument) {
-                  setViewingDocId(submittalDocument.id);
-                } else if (specDocuments.length > 0) {
-                  setViewingDocId(specDocuments[0].id);
-                }
-              }}
+            <DualPdfViewer
+              // Spec document
+              specPages={specDocuments.length > 0 ? (documentPages.get(specDocuments[0].id) || []) : []}
+              specCurrentPage={currentPage}
+              specTotalPages={specDocuments.length > 0 ? (documentPages.get(specDocuments[0].id)?.length || 0) : 0}
+              onSpecPageChange={setCurrentPage}
+              specBoundingBox={highlightData?.boundingBox}
               hasSpec={specDocuments.length > 0}
+              
+              // Submittal document
+              submittalPages={submittalDocument ? (documentPages.get(submittalDocument.id) || []) : []}
+              submittalCurrentPage={submittalCurrentPage}
+              submittalTotalPages={submittalDocument ? (documentPages.get(submittalDocument.id)?.length || 0) : 0}
+              onSubmittalPageChange={setSubmittalCurrentPage}
+              submittalBoundingBox={
+                highlightData?.type === "extracted" && highlightData.row.submittalLocation?.boundingBox
+                  ? highlightData.row.submittalLocation.boundingBox
+                  : undefined
+              }
               hasSubmittal={!!submittalDocument}
-              boundingBox={highlightData?.boundingBox}
-              selectedComparison={highlightData?.type === "comparison" ? highlightData.comparison : undefined}
-              highlightedRow={highlightData?.type === "extracted" ? highlightData.row : undefined}
+              
+              // View mode
+              splitView={splitView && !!submittalDocument}
+              onToggleSplitView={() => setSplitView(!splitView)}
+              viewingDocument={viewingDocument}
+              onDocumentChange={(doc: "spec" | "submittal") => setViewingDocument(doc)}
+              
+              // Selected row for header display
+              selectedRow={hoveredExtractedRow || selectedExtractedRow || undefined}
             />
           </div>
           
@@ -1075,6 +1191,8 @@ export function CDEWorkspace() {
                 isLoading={isExtracting}
                 extractionProgress={extractionProgress}
                 hasSubmittal={!!submittalDocument}
+                onPause={handlePauseExtraction}
+                isPaused={isPaused}
               />
             )}
           </div>

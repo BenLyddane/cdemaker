@@ -30,6 +30,7 @@ import {
   Sparkles,
   User,
   Loader2,
+  Pause,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ExtractedRow, CDEStatus } from "@/lib/types";
@@ -49,6 +50,8 @@ interface ExtractedDataPanelProps {
   selectedRowId: string | null;
   extractionProgress?: ExtractionProgress | null;
   hasSubmittal?: boolean;
+  onPause?: () => void;
+  isPaused?: boolean;
 }
 
 type ConfidenceFilter = "all" | "high" | "medium" | "low";
@@ -454,8 +457,9 @@ function DataRow({
                 </Badge>
               )}
               
-              {/* Accept AI Decision Button */}
-              {row.cdeSource === "ai" && !row.isReviewed && row.cdeStatus && onAcceptAiDecision && (
+              {/* Accept AI Decision Button - only show if AI actually found it in submittal */}
+              {row.cdeSource === "ai" && !row.isReviewed && row.cdeStatus && onAcceptAiDecision && 
+               (row.submittalValue || (row.matchConfidence && row.matchConfidence !== "not_found")) && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -606,6 +610,8 @@ export function ExtractedDataPanel({
   selectedRowId,
   extractionProgress,
   hasSubmittal = false,
+  onPause,
+  isPaused = false,
 }: ExtractedDataPanelProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const logContainerRef = useRef<HTMLDivElement>(null);
@@ -723,6 +729,18 @@ export function ExtractedDataPanel({
                   <span className="text-micro text-neutral-400">
                     (Page {extractionProgress.currentPage}/{extractionProgress.totalPages})
                   </span>
+                )}
+                {onPause && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={onPause}
+                    className="h-6 px-2 text-micro gap-1 ml-2 text-yellow-700 border-yellow-400 hover:bg-yellow-100"
+                    title="Pause extraction - data will be saved"
+                  >
+                    <Pause className="h-3 w-3" />
+                    Pause
+                  </Button>
                 )}
               </div>
             ) : (
