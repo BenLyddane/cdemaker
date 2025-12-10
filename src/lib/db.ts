@@ -179,6 +179,16 @@ export interface ExtractedRowDB {
   page_number: number | null;
   location: Record<string, unknown> | null;
   raw_text: string | null;
+  // CDE fields
+  cde_status: "comply" | "deviate" | "exception" | "pending" | null;
+  cde_comment: string | null;
+  cde_source: "ai" | "human" | null;
+  is_reviewed: boolean;
+  submittal_value: string | null;
+  submittal_unit: string | null;
+  submittal_location: Record<string, unknown> | null;
+  match_confidence: "high" | "medium" | "low" | "not_found" | null;
+  updated_at: string | null;
 }
 
 export async function saveExtraction(
@@ -261,6 +271,15 @@ export function dbRowsToExtractedRows(dbRows: ExtractedRowDB[]): ExtractedRow[] 
     pageNumber: row.page_number || 1,
     location: row.location as unknown as DocumentLocation | undefined,
     rawText: row.raw_text || undefined,
+    // CDE fields
+    cdeStatus: row.cde_status || undefined,
+    cdeComment: row.cde_comment || undefined,
+    cdeSource: row.cde_source || undefined,
+    isReviewed: row.is_reviewed || false,
+    submittalValue: row.submittal_value || undefined,
+    submittalUnit: row.submittal_unit || undefined,
+    submittalLocation: row.submittal_location as unknown as DocumentLocation | undefined,
+    matchConfidence: row.match_confidence || undefined,
   }));
 }
 
