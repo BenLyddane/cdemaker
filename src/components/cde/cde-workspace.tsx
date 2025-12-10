@@ -6,7 +6,7 @@ import { PdfViewerPanel } from "./pdf-viewer-panel";
 import { ComparisonPanel } from "./comparison-panel";
 import { ExtractedDataPanel } from "./extracted-data-panel";
 import { Button } from "@/components/ui/button";
-import { FileText, Download, Loader2, FolderOpen, Save } from "lucide-react";
+import { FileText, Download, Loader2, FolderOpen, Save, Check, X } from "lucide-react";
 import Image from "next/image";
 import { UserMenu } from "@/components/auth/user-menu";
 import { useUser } from "@stackframe/stack";
@@ -72,6 +72,11 @@ export function CDEWorkspace() {
   const [extractionProgress, setExtractionProgress] = useState<ExtractionProgress | null>(null);
   const extractionAbortRef = useRef<AbortController | null>(null);
   
+  // AI CDE processing queue
+  const aiCdeQueueRef = useRef<ExtractedRow[]>([]);
+  const aiCdeProcessingRef = useRef<boolean>(false);
+  const submittalPagesRef = useRef<PageData[] | null>(null);
+  
   // View state
   const [viewingDocId, setViewingDocId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -123,6 +128,146 @@ export function CDEWorkspace() {
       };
     });
   }, []);
+
+  // Update a row with AI CDE results
+  const updateRowWithAiResult = useCallback((rowId: string, result: {
+    status: CDEStatus;
+    matchConfidence: "high" | "medium" | "low" | "not_found";
+    explanation: string;
+    submittalValue?: string;
+    submittalUnit?: string;
+    submittalLocation?: { pageNumber: number; boundingBox?: { x: number; y: number; width: number; height: number } };
+  }) => {
+    setDocumentExtractions(prev => {
+      const newMap = new Map(prev);
+      for (const [docId, extraction] of newMap.entries()) {
+        const rowIndex = extraction.rows.findIndex(r => r.id === rowId);
+        if (rowIndex !== -1) {
+          const newRows = [...extraction.rows];
+          newRows[rowIndex] = {
+            ...newRows[rowIndex],
+            cdeStatus: result.status,
+            cdeComment: result.explanation,
+            cdeSource: "ai",
+            aiSuggestedStatus: result.status,
+            aiSuggestedComment: result.explanation,
+            isAiProcessing: false,
+            submittalValue: result.submittalValue,
+            submittalUnit: result.submittalUnit,
+            submittalLocation: result.submittalLocation,
+            matchConfidence: result.matchConfidence,
+          };
+          newMap.set(docId, { ...extraction, rows: newRows });
+          break;
+        }
+      }
+      return newMap;
+    });
+  }, []);
+
+  // Process a single row with AI CDE
+  const processRowWithAiCde = useCallback(async (row: ExtractedRow, submittalPages: PageData[]) => {
+    try {
+      const response = await fetch("/api/compare-single", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          specRow: row,
+          submittalPages: submittalPages.map(p => ({
+            base64: p.base64,
+            mimeType: p.mimeType,
+            pageNumber: p.pageNumber,
+          })),
+        }),
+      });
+
+      if (!response.ok) {
+        console.error(`AI CDE failed for row ${row.id}`);
+        // Mark as no longer processing but don't set status
+        setDocumentExtractions(prev => {
+          const newMap = new Map(prev);
+          for (const [docId, extraction] of newMap.entries()) {
+            const rowIndex = extraction.rows.findIndex(r => r.id === row.id);
+            if (rowIndex !== -1) {
+              const newRows = [...extraction.rows];
+              newRows[rowIndex] = { ...newRows[rowIndex], isAiProcessing: false };
+              newMap.set(docId, { ...extraction, rows: newRows });
+              break;
+            }
+          }
+          return newMap;
+        });
+        return;
+      }
+
+      const result = await response.json();
+      if (result.success && result.data) {
+        updateRowWithAiResult(row.id, result.data);
+      }
+    } catch (error) {
+      console.error(`AI CDE error for row ${row.id}:`, error);
+      // Mark as no longer processing
+      setDocumentExtractions(prev => {
+        const newMap = new Map(prev);
+        for (const [docId, extraction] of newMap.entries()) {
+          const rowIndex = extraction.rows.findIndex(r => r.id === row.id);
+          if (rowIndex !== -1) {
+            const newRows = [...extraction.rows];
+            newRows[rowIndex] = { ...newRows[rowIndex], isAiProcessing: false };
+            newMap.set(docId, { ...extraction, rows: newRows });
+            break;
+          }
+        }
+        return newMap;
+      });
+    }
+  }, [updateRowWithAiResult]);
+
+  // Process the AI CDE queue
+  const processAiCdeQueue = useCallback(async () => {
+    if (aiCdeProcessingRef.current) return;
+    if (aiCdeQueueRef.current.length === 0) return;
+    if (!submittalPagesRef.current) return;
+
+    aiCdeProcessingRef.current = true;
+    const submittalPages = submittalPagesRef.current;
+
+    while (aiCdeQueueRef.current.length > 0) {
+      const row = aiCdeQueueRef.current.shift();
+      if (row) {
+        await processRowWithAiCde(row, submittalPages);
+        // Small delay between requests to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+    }
+
+    aiCdeProcessingRef.current = false;
+  }, [processRowWithAiCde]);
+
+  // Queue rows for AI CDE processing
+  const queueRowsForAiCde = useCallback((rows: ExtractedRow[], docId: string) => {
+    // Mark rows as AI processing
+    setDocumentExtractions(prev => {
+      const current = prev.get(docId);
+      if (!current) return prev;
+      
+      const newMap = new Map(prev);
+      const newRows = current.rows.map(r => {
+        if (rows.some(newRow => newRow.id === r.id)) {
+          return { ...r, isAiProcessing: true };
+        }
+        return r;
+      });
+      newMap.set(docId, { ...current, rows: newRows });
+      return newMap;
+    });
+
+    // Add to queue
+    aiCdeQueueRef.current.push(...rows);
+
+    // Start processing if not already running
+    processAiCdeQueue();
+  }, [processAiCdeQueue]);
 
   // Process a spec/schedule document with streaming
   const processSpecDocument = useCallback(async (doc: UploadedDocument) => {
@@ -284,6 +429,12 @@ export function CDEWorkspace() {
                     setSpecDocuments(prev => prev.map(d => 
                       d.id === doc.id ? { ...d, itemCount: (d.itemCount || 0) + event.rows.length } : d
                     ));
+                    
+                    // Queue rows for AI CDE if submittal is available
+                    if (submittalPagesRef.current && submittalPagesRef.current.length > 0) {
+                      addLog(`Queuing ${event.rows.length} items for AI CDE...`, "info");
+                      queueRowsForAiCde(event.rows, doc.id);
+                    }
                   }
                   break;
                   
@@ -335,6 +486,9 @@ export function CDEWorkspace() {
       const pages = await extractPages(doc.file);
       setDocumentPages(prev => new Map(prev).set(doc.id, pages));
       
+      // Store pages in ref for AI CDE processing
+      submittalPagesRef.current = pages;
+      
       // Detect document type to confirm it's a submittal
       const detectResponse = await fetch("/api/extract", {
         method: "POST",
@@ -361,6 +515,33 @@ export function CDEWorkspace() {
         reason,
         itemCount: pages.length,
       });
+      
+      // If there are already extracted rows and we're still extracting, queue them for AI CDE
+      // This handles the case where user uploads submittal while spec is being extracted
+      // The rows will be processed by the queue processor
+      // Note: We don't queue here because the page_complete handler will queue new rows
+      // For existing rows that were extracted before submittal was uploaded, we queue them now
+      setDocumentExtractions(prev => {
+        const rowsToQueue: { rows: ExtractedRow[]; docId: string }[] = [];
+        
+        for (const [docId, extraction] of prev.entries()) {
+          // Only queue rows that don't have AI CDE results yet
+          const unprocessedRows = extraction.rows.filter(r => !r.cdeStatus && !r.isAiProcessing);
+          if (unprocessedRows.length > 0) {
+            rowsToQueue.push({ rows: unprocessedRows, docId });
+          }
+        }
+        
+        // Queue rows outside of setState to avoid issues
+        setTimeout(() => {
+          for (const { rows, docId } of rowsToQueue) {
+            queueRowsForAiCde(rows, docId);
+          }
+        }, 100);
+        
+        return prev;
+      });
+      
     } catch (error) {
       console.error("Submittal processing error:", error);
       setSubmittalDocument({
@@ -369,7 +550,7 @@ export function CDEWorkspace() {
         error: String(error),
       });
     }
-  }, []);
+  }, [queueRowsForAiCde]);
   
   // Add spec document
   const handleAddSpecDocument = useCallback(async (file: File) => {
@@ -501,6 +682,69 @@ export function CDEWorkspace() {
     });
   }, []);
   
+  // Handle CDE status change on extracted row
+  const handleExtractedRowStatusChange = useCallback((rowId: string, status: CDEStatus) => {
+    setDocumentExtractions(prev => {
+      const newMap = new Map(prev);
+      for (const [docId, extraction] of newMap.entries()) {
+        const rowIndex = extraction.rows.findIndex(r => r.id === rowId);
+        if (rowIndex !== -1) {
+          const newRows = [...extraction.rows];
+          newRows[rowIndex] = { 
+            ...newRows[rowIndex], 
+            cdeStatus: status,
+            isReviewed: true,
+          };
+          newMap.set(docId, { ...extraction, rows: newRows });
+          break;
+        }
+      }
+      return newMap;
+    });
+  }, []);
+  
+  // Handle CDE comment change on extracted row
+  const handleExtractedRowCommentChange = useCallback((rowId: string, comment: string) => {
+    setDocumentExtractions(prev => {
+      const newMap = new Map(prev);
+      for (const [docId, extraction] of newMap.entries()) {
+        const rowIndex = extraction.rows.findIndex(r => r.id === rowId);
+        if (rowIndex !== -1) {
+          const newRows = [...extraction.rows];
+          newRows[rowIndex] = { 
+            ...newRows[rowIndex], 
+            cdeComment: comment,
+          };
+          newMap.set(docId, { ...extraction, rows: newRows });
+          break;
+        }
+      }
+      return newMap;
+    });
+  }, []);
+  
+  // Accept AI decision - marks the AI suggestion as human-reviewed
+  const handleAcceptAiDecision = useCallback((rowId: string) => {
+    setDocumentExtractions(prev => {
+      const newMap = new Map(prev);
+      for (const [docId, extraction] of newMap.entries()) {
+        const rowIndex = extraction.rows.findIndex(r => r.id === rowId);
+        if (rowIndex !== -1) {
+          const newRows = [...extraction.rows];
+          const row = newRows[rowIndex];
+          newRows[rowIndex] = { 
+            ...row, 
+            isReviewed: true,
+            cdeSource: "human", // Mark as human-reviewed now
+          };
+          newMap.set(docId, { ...extraction, rows: newRows });
+          break;
+        }
+      }
+      return newMap;
+    });
+  }, []);
+  
   // Create CDE (run comparison)
   const handleCreateCDE = useCallback(async () => {
     if (!submittalDocument) return;
@@ -592,8 +836,25 @@ export function CDEWorkspace() {
   }, [workflowPhase, hoveredExtractedRow, selectedExtractedRow, selectedComparisonData]);
   
   const isProcessing = isExtracting || isComparing;
-  const canGeneratePdf = comparisons.length > 0 && !isProcessing;
   const currentPhase = determineWorkflowPhase();
+  
+  // Calculate summary from extracted rows (for manual CDE)
+  const extractedRowsSummary = useMemo(() => {
+    const total = allExtractedRows.length;
+    const comply = allExtractedRows.filter(r => r.cdeStatus === "comply").length;
+    const deviate = allExtractedRows.filter(r => r.cdeStatus === "deviate").length;
+    const exception = allExtractedRows.filter(r => r.cdeStatus === "exception").length;
+    const pending = total - comply - deviate - exception;
+    const reviewed = allExtractedRows.filter(r => r.isReviewed).length;
+    
+    return { totalItems: total, comply, deviate, exception, pending, reviewed };
+  }, [allExtractedRows]);
+  
+  // Use extracted rows summary if no AI comparison done, otherwise use comparison summary
+  const displaySummary = comparisons.length > 0 ? summary : extractedRowsSummary;
+  
+  // Can generate PDF if any rows have been reviewed
+  const canGeneratePdf = (extractedRowsSummary.reviewed > 0 || comparisons.length > 0) && !isProcessing;
   
   // Combine all documents for sidebar display
   const allDocuments = useMemo(() => {
@@ -613,9 +874,15 @@ export function CDEWorkspace() {
   const [currentProjectName, setCurrentProjectName] = useState<string | null>(null);
   const [showProjectsModal, setShowProjectsModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   
   // Check if there's any work to save
   const hasWorkToSave = specDocuments.length > 0 || comparisons.length > 0;
+  
+  // Clear save message after delay
+  const clearSaveMessage = useCallback(() => {
+    setTimeout(() => setSaveMessage(null), 3000);
+  }, []);
   
   // Save project function
   const handleSaveProject = useCallback(async () => {
@@ -625,6 +892,7 @@ export function CDEWorkspace() {
     if (!projectName) return;
     
     setIsSaving(true);
+    setSaveMessage(null);
     
     try {
       // Create or update project
@@ -635,32 +903,29 @@ export function CDEWorkspace() {
           id: currentProjectId,
           name: projectName,
           userId: user.id,
-          // We'll store project state metadata
-          state: {
-            specDocumentCount: specDocuments.length,
-            hasSubmittal: !!submittalDocument,
-            comparisonCount: comparisons.length,
-            extractedRowCount: allExtractedRows.length,
-            summary: summary,
-            workflowPhase: determineWorkflowPhase(),
-          },
         }),
       });
       
-      if (!response.ok) throw new Error("Failed to save project");
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to save project");
+      }
       
       const result = await response.json();
-      setCurrentProjectId(result.data.id);
+      // API returns project directly, not wrapped in data
+      setCurrentProjectId(result.id);
       setCurrentProjectName(projectName);
       
-      alert("Project saved successfully!");
+      setSaveMessage({ type: "success", text: "Project saved!" });
+      clearSaveMessage();
     } catch (error) {
       console.error("Save error:", error);
-      alert("Failed to save project. Please try again.");
+      setSaveMessage({ type: "error", text: error instanceof Error ? error.message : "Failed to save" });
+      clearSaveMessage();
     } finally {
       setIsSaving(false);
     }
-  }, [user, currentProjectId, currentProjectName, specDocuments, submittalDocument, comparisons, allExtractedRows, summary, determineWorkflowPhase]);
+  }, [user, currentProjectId, currentProjectName, clearSaveMessage]);
   
   return (
     <div className="flex flex-col h-screen bg-neutral-50">
@@ -688,20 +953,38 @@ export function CDEWorkspace() {
           
           {/* Save button - only visible when signed in and has work */}
           {isSignedIn && hasWorkToSave && (
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="gap-2"
-              onClick={handleSaveProject}
-              disabled={isSaving}
-            >
-              {isSaving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4" />
+            <div className="flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="gap-2"
+                onClick={handleSaveProject}
+                disabled={isSaving}
+              >
+                {isSaving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                {currentProjectId ? "Save" : "Save Project"}
+              </Button>
+              
+              {/* Save status message */}
+              {saveMessage && (
+                <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-detail font-medium transition-all ${
+                  saveMessage.type === "success" 
+                    ? "bg-green-100 text-green-700" 
+                    : "bg-red-100 text-red-700"
+                }`}>
+                  {saveMessage.type === "success" ? (
+                    <Check className="h-3.5 w-3.5" />
+                  ) : (
+                    <X className="h-3.5 w-3.5" />
+                  )}
+                  {saveMessage.text}
+                </div>
               )}
-              {currentProjectId ? "Save" : "Save Project"}
-            </Button>
+            </div>
           )}
           
           <div className="h-6 w-px bg-neutral-200" />
@@ -736,7 +1019,7 @@ export function CDEWorkspace() {
           isExtracting={isExtracting}
           isComparing={isComparing}
           canCreateCDE={canCreateCDE}
-          summary={summary}
+          summary={displaySummary}
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
           workflowPhase={currentPhase}
@@ -786,8 +1069,12 @@ export function CDEWorkspace() {
                 onRowSelect={handleExtractedRowSelect}
                 onRowDelete={handleDeleteExtractedRow}
                 onRowEdit={handleEditExtractedRow}
+                onStatusChange={handleExtractedRowStatusChange}
+                onCommentChange={handleExtractedRowCommentChange}
+                onAcceptAiDecision={handleAcceptAiDecision}
                 isLoading={isExtracting}
                 extractionProgress={extractionProgress}
+                hasSubmittal={!!submittalDocument}
               />
             )}
           </div>

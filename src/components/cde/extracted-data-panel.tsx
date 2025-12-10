@@ -21,9 +21,18 @@ import {
   FileText,
   AlertCircle,
   Hash,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  Clock,
+  MessageSquare,
+  Package,
+  Sparkles,
+  User,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ExtractedRow } from "@/lib/types";
+import type { ExtractedRow, CDEStatus } from "@/lib/types";
 import type { ExtractionProgress } from "./cde-workspace";
 
 interface ExtractedDataPanelProps {
@@ -33,13 +42,94 @@ interface ExtractedDataPanelProps {
   onRowSelect: (row: ExtractedRow) => void;
   onRowDelete?: (rowId: string) => void;
   onRowEdit?: (rowId: string, updates: Partial<ExtractedRow>) => void;
+  onStatusChange?: (rowId: string, status: CDEStatus) => void;
+  onCommentChange?: (rowId: string, comment: string) => void;
+  onAcceptAiDecision?: (rowId: string) => void;
   isLoading: boolean;
   selectedRowId: string | null;
   extractionProgress?: ExtractionProgress | null;
+  hasSubmittal?: boolean;
 }
 
 type ConfidenceFilter = "all" | "high" | "medium" | "low";
-type SortField = "field" | "page" | "confidence" | "specNumber";
+type StatusFilter = "all" | CDEStatus | "unreviewed";
+type SortField = "field" | "page" | "confidence" | "specNumber" | "status";
+
+// CDE Status Quick Select Component
+const statusConfig = {
+  comply: {
+    icon: CheckCircle2,
+    label: "Comply",
+    shortLabel: "C",
+    className: "bg-green-100 text-green-700 border-green-400 hover:bg-green-200",
+    activeClassName: "ring-2 ring-green-400",
+  },
+  deviate: {
+    icon: AlertTriangle,
+    label: "Deviate",
+    shortLabel: "D",
+    className: "bg-yellow-100 text-yellow-700 border-yellow-400 hover:bg-yellow-200",
+    activeClassName: "ring-2 ring-yellow-400",
+  },
+  exception: {
+    icon: XCircle,
+    label: "Exception",
+    shortLabel: "E",
+    className: "bg-red-100 text-red-700 border-red-400 hover:bg-red-200",
+    activeClassName: "ring-2 ring-red-400",
+  },
+  pending: {
+    icon: Clock,
+    label: "Pending",
+    shortLabel: "P",
+    className: "bg-neutral-100 text-neutral-600 border-neutral-300 hover:bg-neutral-200",
+    activeClassName: "ring-2 ring-neutral-400",
+  },
+};
+
+function StatusQuickSelect({ 
+  value, 
+  onChange,
+  disabled = false,
+}: { 
+  value?: CDEStatus; 
+  onChange: (status: CDEStatus) => void;
+  disabled?: boolean;
+}) {
+  const statuses: CDEStatus[] = ["comply", "deviate", "exception"];
+  
+  return (
+    <div className="flex items-center gap-1">
+      {statuses.map((status) => {
+        const config = statusConfig[status];
+        const Icon = config.icon;
+        const isSelected = status === value;
+        
+        return (
+          <button
+            key={status}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!disabled) onChange(status);
+            }}
+            disabled={disabled}
+            className={cn(
+              "flex items-center justify-center h-7 w-7 rounded border transition-all",
+              isSelected 
+                ? cn(config.className, config.activeClassName)
+                : "text-neutral-400 border-neutral-200 hover:text-neutral-600 hover:bg-neutral-100",
+              disabled && "opacity-50 cursor-not-allowed"
+            )}
+            title={config.label}
+          >
+            <Icon className="h-4 w-4" />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function ConfidenceBadge({ confidence }: { confidence: "high" | "medium" | "low" }) {
   const config = {
@@ -159,6 +249,10 @@ interface DataRowProps {
   onSelect: () => void;
   onDelete?: () => void;
   onEdit?: (updates: Partial<ExtractedRow>) => void;
+  onStatusChange?: (status: CDEStatus) => void;
+  onCommentChange?: (comment: string) => void;
+  onAcceptAiDecision?: () => void;
+  hasSubmittal?: boolean;
 }
 
 function DataRow({
@@ -169,10 +263,16 @@ function DataRow({
   onSelect,
   onDelete,
   onEdit,
+  onStatusChange,
+  onCommentChange,
+  onAcceptAiDecision,
+  hasSubmittal,
 }: DataRowProps) {
   const [isEditing, setIsEditing] = useState(false);
+  const [isEditingComment, setIsEditingComment] = useState(false);
   const [editedField, setEditedField] = useState(row.field);
   const [editedValue, setEditedValue] = useState(row.value);
+  const [editedComment, setEditedComment] = useState(row.cdeComment || "");
   
   const handleSaveEdit = () => {
     if (onEdit) {
@@ -187,26 +287,39 @@ function DataRow({
     setIsEditing(false);
   };
   
+  const handleSaveComment = () => {
+    if (onCommentChange) {
+      onCommentChange(editedComment);
+    }
+    setIsEditingComment(false);
+  };
+  
+  const handleCancelComment = () => {
+    setEditedComment(row.cdeComment || "");
+    setIsEditingComment(false);
+  };
+  
   return (
     <tr 
       className={cn(
         "group cursor-pointer transition-colors",
         isHovered && "bg-bv-blue-100/70",
         isSelected && !isHovered && "bg-bv-blue-50",
-        !isHovered && !isSelected && "hover:bg-neutral-50"
+        row.isReviewed && !isHovered && !isSelected && "bg-green-50/30",
+        !isHovered && !isSelected && !row.isReviewed && "hover:bg-neutral-50"
       )}
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
       onClick={onSelect}
     >
       {/* Spec Number */}
-      <td className="px-3 py-3 text-detail text-neutral-500 min-w-[180px]">
+      <td className="px-3 py-2.5 text-detail text-neutral-500">
         {row.specNumber ? (
           <HoverCard openDelay={200} closeDelay={100}>
             <HoverCardTrigger asChild>
               <div className="flex items-center gap-1.5 cursor-help">
                 <Hash className="h-3 w-3 flex-shrink-0 text-bv-blue-400" />
-                <span className="font-mono text-micro text-neutral-700 truncate max-w-[150px]">
+                <span className="font-mono text-detail text-neutral-700 whitespace-nowrap">
                   {row.specNumber}
                 </span>
               </div>
@@ -223,7 +336,7 @@ function DataRow({
       </td>
       
       {/* Field */}
-      <td className="px-3 py-3 text-detail font-medium text-neutral-800">
+      <td className="px-3 py-2.5 text-detail font-medium text-neutral-800">
         {isEditing ? (
           <Input
             value={editedField}
@@ -234,14 +347,14 @@ function DataRow({
         ) : (
           <TruncatedText 
             text={row.field} 
-            maxWidth={180}
+            maxWidth={140}
             subText={row.section}
           />
         )}
       </td>
       
-      {/* Value */}
-      <td className="px-3 py-3 text-detail text-neutral-600">
+      {/* Spec Value */}
+      <td className="px-3 py-2.5 text-detail text-neutral-600">
         {isEditing ? (
           <Input
             value={editedValue}
@@ -250,25 +363,173 @@ function DataRow({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <ValueWithHover value={row.value} unit={row.unit} maxWidth={250} />
+          <div>
+            <ValueWithHover value={row.value} unit={row.unit} maxWidth={120} />
+            <div className="text-micro text-neutral-400 flex items-center gap-1 mt-0.5">
+              <FileText className="h-3 w-3" />
+              <span>p.{row.pageNumber}</span>
+            </div>
+          </div>
         )}
       </td>
       
-      {/* Confidence */}
-      <td className="px-3 py-3">
-        <ConfidenceBadge confidence={row.confidence} />
+      {/* Submittal Value (if available) */}
+      <td className="px-3 py-2.5 text-detail text-neutral-600">
+        {row.submittalValue ? (
+          <div>
+            <ValueWithHover value={row.submittalValue} unit={row.submittalUnit} maxWidth={120} />
+            {row.submittalLocation && (
+              <div className="text-micro text-green-600 flex items-center gap-1 mt-0.5">
+                <Package className="h-3 w-3" />
+                <span>p.{row.submittalLocation.pageNumber}</span>
+              </div>
+            )}
+          </div>
+        ) : hasSubmittal ? (
+          <span className="text-neutral-400 italic text-micro">Not found</span>
+        ) : (
+          <span className="text-neutral-300 text-micro">—</span>
+        )}
       </td>
       
-      {/* Page */}
-      <td className="px-3 py-3 text-detail text-neutral-500">
-        <div className="flex items-center gap-1">
-          <FileText className="h-3 w-3" />
-          <span>{row.pageNumber}</span>
+      {/* CDE Status */}
+      <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2">
+          {/* AI Processing Loader */}
+          {row.isAiProcessing && (
+            <div className="flex items-center gap-1.5 text-purple-600">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-micro">AI checking...</span>
+            </div>
+          )}
+          
+          {/* Status selector or badge */}
+          {!row.isAiProcessing && (
+            <>
+              {onStatusChange ? (
+                <StatusQuickSelect
+                  value={row.cdeStatus}
+                  onChange={onStatusChange}
+                />
+              ) : (
+                row.cdeStatus ? (
+                  <Badge variant="outline" className={cn("text-micro", statusConfig[row.cdeStatus].className)}>
+                    {statusConfig[row.cdeStatus].shortLabel}
+                  </Badge>
+                ) : (
+                  <span className="text-neutral-300">—</span>
+                )
+              )}
+              
+              {/* AI/Human badge */}
+              {row.cdeStatus && (
+                <Badge 
+                  variant="outline" 
+                  className={cn(
+                    "text-micro gap-1",
+                    row.cdeSource === "ai" && !row.isReviewed
+                      ? "bg-purple-50 text-purple-600 border-purple-300"
+                      : row.isReviewed 
+                        ? "bg-blue-50 text-blue-600 border-blue-300"
+                        : "bg-neutral-50 text-neutral-500 border-neutral-300"
+                  )}
+                  title={row.cdeSource === "ai" && !row.isReviewed 
+                    ? "AI suggested - click Accept to confirm" 
+                    : row.isReviewed 
+                      ? "Human reviewed" 
+                      : "Source unknown"
+                  }
+                >
+                  {row.cdeSource === "ai" && !row.isReviewed ? (
+                    <>
+                      <Sparkles className="h-3 w-3" />
+                      AI
+                    </>
+                  ) : row.isReviewed ? (
+                    <>
+                      <User className="h-3 w-3" />
+                      ✓
+                    </>
+                  ) : null}
+                </Badge>
+              )}
+              
+              {/* Accept AI Decision Button */}
+              {row.cdeSource === "ai" && !row.isReviewed && row.cdeStatus && onAcceptAiDecision && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAcceptAiDecision();
+                  }}
+                  className="h-6 px-2 text-micro gap-1 bg-purple-50 text-purple-700 border-purple-300 hover:bg-purple-100 hover:border-purple-400"
+                  title="Accept AI decision as reviewed"
+                >
+                  <Check className="h-3 w-3" />
+                  Accept
+                </Button>
+              )}
+            </>
+          )}
         </div>
       </td>
       
+      {/* Comment */}
+      <td className="px-3 py-2.5 max-w-[180px]" onClick={(e) => e.stopPropagation()}>
+        {isEditingComment ? (
+          <div className="flex items-center gap-1">
+            <Input
+              value={editedComment}
+              onChange={(e) => setEditedComment(e.target.value)}
+              className="h-7 text-micro"
+              placeholder="Add comment..."
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSaveComment();
+                if (e.key === "Escape") handleCancelComment();
+              }}
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleSaveComment}
+              className="h-6 w-6 p-0 text-green-600 hover:text-green-700 hover:bg-green-100"
+            >
+              <Check className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCancelComment}
+              className="h-6 w-6 p-0 text-red-600 hover:text-red-700 hover:bg-red-100"
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          </div>
+        ) : (
+          <div 
+            className="flex items-center gap-1 group/comment cursor-pointer hover:bg-neutral-100 rounded px-1 py-0.5 -mx-1"
+            onClick={() => onCommentChange && setIsEditingComment(true)}
+          >
+            {row.cdeComment ? (
+              <span className="text-micro text-neutral-600 truncate flex-1" title={row.cdeComment}>
+                {row.cdeComment}
+              </span>
+            ) : (
+              <span className="text-micro text-neutral-400 italic">
+                {onCommentChange ? "Click to add..." : "—"}
+              </span>
+            )}
+            {onCommentChange && (
+              <MessageSquare className="h-3 w-3 text-neutral-400 opacity-0 group-hover/comment:opacity-100 flex-shrink-0" />
+            )}
+          </div>
+        )}
+      </td>
+      
       {/* Actions */}
-      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+      <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
         {isEditing ? (
           <div className="flex items-center gap-1">
             <Button
@@ -338,12 +599,17 @@ export function ExtractedDataPanel({
   onRowSelect,
   onRowDelete,
   onRowEdit,
+  onStatusChange,
+  onCommentChange,
+  onAcceptAiDecision,
   isLoading,
   selectedRowId,
   extractionProgress,
+  hasSubmittal = false,
 }: ExtractedDataPanelProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const logContainerRef = useRef<HTMLDivElement>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   
   // Auto-scroll logs to bottom
   useEffect(() => {
@@ -564,7 +830,7 @@ export function ExtractedDataPanel({
           <thead className="bg-neutral-50 sticky top-0 z-10">
             <tr>
               <th 
-                className="px-3 py-2 text-left text-detail font-semibold text-neutral-600 cursor-pointer hover:bg-neutral-100 w-24"
+                className="px-3 py-2 text-left text-detail font-semibold text-neutral-600 cursor-pointer hover:bg-neutral-100"
                 onClick={() => handleSort("specNumber")}
               >
                 <div className="flex items-center gap-1">
@@ -579,38 +845,36 @@ export function ExtractedDataPanel({
                 onClick={() => handleSort("field")}
               >
                 <div className="flex items-center gap-1">
-                  Field / Section
+                  Field
                   {sortField === "field" && (
                     sortDirection === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
                   )}
                 </div>
               </th>
               <th className="px-3 py-2 text-left text-detail font-semibold text-neutral-600">
-                Value
+                Spec Value
               </th>
-              <th 
-                className="px-3 py-2 text-left text-detail font-semibold text-neutral-600 cursor-pointer hover:bg-neutral-100"
-                onClick={() => handleSort("confidence")}
-              >
+              <th className="px-3 py-2 text-left text-detail font-semibold text-neutral-600">
                 <div className="flex items-center gap-1">
-                  Confidence
-                  {sortField === "confidence" && (
-                    sortDirection === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
-                  )}
+                  <Package className="h-3 w-3" />
+                  Submittal
                 </div>
               </th>
               <th 
                 className="px-3 py-2 text-left text-detail font-semibold text-neutral-600 cursor-pointer hover:bg-neutral-100"
-                onClick={() => handleSort("page")}
+                onClick={() => handleSort("status")}
               >
                 <div className="flex items-center gap-1">
-                  Page
-                  {sortField === "page" && (
+                  Status
+                  {sortField === "status" && (
                     sortDirection === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
                   )}
                 </div>
               </th>
-              <th className="px-3 py-2 text-left text-detail font-semibold text-neutral-600 w-24">
+              <th className="px-3 py-2 text-left text-detail font-semibold text-neutral-600">
+                Comment
+              </th>
+              <th className="px-3 py-2 text-left text-detail font-semibold text-neutral-600 w-20">
                 Actions
               </th>
             </tr>
@@ -626,6 +890,10 @@ export function ExtractedDataPanel({
                 onSelect={() => onRowSelect(row)}
                 onDelete={onRowDelete ? () => onRowDelete(row.id) : undefined}
                 onEdit={onRowEdit ? (updates) => onRowEdit(row.id, updates) : undefined}
+                onStatusChange={onStatusChange ? (status) => onStatusChange(row.id, status) : undefined}
+                onCommentChange={onCommentChange ? (comment) => onCommentChange(row.id, comment) : undefined}
+                onAcceptAiDecision={onAcceptAiDecision ? () => onAcceptAiDecision(row.id) : undefined}
+                hasSubmittal={hasSubmittal}
               />
             ))}
           </tbody>

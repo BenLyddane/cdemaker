@@ -123,20 +123,54 @@ EXTRACTION RULES:
 1. Extract COMPLETE requirements - each row should be something reviewable
 2. CONSOLIDATE related specs (electrical together, dimensions together, etc.)
 3. Include the FULL requirement text, not just values
-4. CRITICAL - Extract FULL SPECIFICATION NUMBER with EXACT subsection path from the document:
-   - Main section number from header/footer (e.g., "23 84 15")
-   - PLUS the letter/number hierarchy EXACTLY as shown (e.g., "D.1", "E.2.a", "PART 2 - 2.3")
-   - Look for indentation and numbering patterns: letters (A, B, C, D, E), numbers (1, 2, 3), sub-letters (a, b, c)
-   - COMBINE them as: "23 84 15 - D.1" or "23 34 00 - E.2.a" or "01 33 00 - PART 1 - 1.2.B"
-   - Examples: If the item is under "D. Refrigerant and Refrigerant Piping" item "3.", use "23 84 15 - D.3"
-   - Examples: If the item is under "E. Coil" item "1.", use "23 84 15 - E.1"
-   - BAD: "23 84 15" alone (MUST include subsection like D.1, E.2, etc.)
+4. **ABSOLUTELY CRITICAL - FULL SPECIFICATION NUMBER EXTRACTION:**
+   
+   ⚠️ IMPORTANT: You MUST ALWAYS include the FULL specification reference path, not just the section number!
+   
+   FORMAT: "[Section #] [Article].[Paragraph].[Subparagraph].[Item]"
+   
+   EXAMPLES - CORRECT vs WRONG:
+   ❌ WRONG: "23 70 00" (missing subsection - NEVER do this!)
+   ✅ CORRECT: "23 70 00 1.4.B" (with full path)
+   ✅ CORRECT: "23 70 00 1.4.B.1" (with item number)
+   ✅ CORRECT: "23 70 00 2.1.A.2.a" (deeply nested)
+   
+   MORE CORRECT EXAMPLES:
+   - "23 70 00 1.4.B" for Shop Drawings requirement in Part 1, Article 1.4, Paragraph B
+   - "23 70 00 1.4.B.1" for the first item under Shop Drawings
+   - "23 70 00 2.2.A" for equipment in Part 2, Article 2.2, Paragraph A
+   - "01 33 00 1.2.C.3" for submittal item
+   
+   HOW TO BUILD THE FULL SPEC NUMBER:
+   1. Start with 6-digit section number from header (e.g., "23 70 00")
+   2. Find the PART number (PART 1 = 1, PART 2 = 2, PART 3 = 3)
+   3. Find the Article number (1.1, 1.2, 1.3, 1.4, 2.1, 2.2, etc.)
+   4. Find the Paragraph letter (A, B, C, D, E, F...)
+   5. Add item numbers if present (1, 2, 3...)
+   6. Add sub-letters if present (a, b, c...)
+   
+   EXAMPLE - Looking at this document structure:
+   
+   SECTION 23 70 00 - AIR HANDLING
+   PART 1 - GENERAL
+     1.4 SUBMITTALS
+       A. Prepare submissions...
+       B. Shop Drawings
+         1. Air Handling Equipment...
+         2. Fans...
+   
+   For "Shop Drawings" → specNumber: "23 70 00 1.4.B"
+   For "Air Handling Equipment" item → specNumber: "23 70 00 1.4.B.1"
+   For "Fans" item → specNumber: "23 70 00 1.4.B.2"
+   
+   ⚠️ NEVER RETURN JUST THE SECTION NUMBER! Always include 1.4.B or similar suffix!
+
 5. Include warranty requirements, notes, submittal requirements, performance specs, etc.
 6. For SCHEDULES/TABLES:
    - Extract each row of the schedule as a separate item
    - Include the TABLE/SCHEDULE TITLE as the section name
    - Include ALL column headers in a meaningful way for the field name
-   - The specNumber should reference the schedule location, e.g., "23 84 15 - SCHEDULE A - Row 1"
+   - The specNumber should reference the schedule location, e.g., "23 84 15 SCHEDULE A Row 1"
 
 BOUNDING BOX INSTRUCTIONS:
 For each extracted item, provide the bounding box coordinates as NORMALIZED values (0.0 to 1.0):

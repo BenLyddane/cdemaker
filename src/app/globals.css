@@ -210,6 +210,136 @@
   }
 }
 
+/* Stack Auth Component Overrides */
+@layer components {
+  /* Stack Auth - Make buttons match BuildVision style */
+  [data-stack-component] button[type="submit"],
+  [data-stack-component] button[data-stack-button] {
+    background-color: #4A3AFF !important;
+    color: white !important;
+    border-radius: 0.5rem !important;
+    font-weight: 500 !important;
+    transition: all 0.15s ease !important;
+  }
+  
+  [data-stack-component] button[type="submit"]:hover,
+  [data-stack-component] button[data-stack-button]:hover {
+    background-color: #3F31DE !important;
+  }
+  
+  /* Stack Auth - Input fields */
+  [data-stack-component] input[type="email"],
+  [data-stack-component] input[type="password"],
+  [data-stack-component] input[type="text"] {
+    border: 1px solid #C9CBCF !important;
+    border-radius: 0.5rem !important;
+    padding: 0.625rem 0.875rem !important;
+    font-size: 14px !important;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+  }
+  
+  [data-stack-component] input:focus {
+    border-color: #4A3AFF !important;
+    box-shadow: 0 0 0 3px rgba(74, 58, 255, 0.1) !important;
+    outline: none !important;
+  }
+  
+  /* Stack Auth - Labels */
+  [data-stack-component] label {
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    color: #2A2A2F !important;
+    margin-bottom: 0.375rem !important;
+  }
+  
+  /* Stack Auth - OAuth buttons */
+  [data-stack-component] button[data-stack-oauth-button] {
+    background-color: white !important;
+    border: 1px solid #C9CBCF !important;
+    color: #2A2A2F !important;
+    border-radius: 0.5rem !important;
+    font-weight: 500 !important;
+    transition: all 0.15s ease !important;
+  }
+  
+  [data-stack-component] button[data-stack-oauth-button]:hover {
+    background-color: #F8F8F8 !important;
+    border-color: #AEB0B7 !important;
+  }
+  
+  /* Stack Auth - Links */
+  [data-stack-component] a {
+    color: #4A3AFF !important;
+    font-weight: 500 !important;
+    text-decoration: underline !important;
+    text-underline-offset: 2px !important;
+  }
+  
+  [data-stack-component] a:hover {
+    color: #3F31DE !important;
+  }
+  
+  /* Stack Auth - Error messages */
+  [data-stack-component] [data-stack-error] {
+    color: #EC4343 !important;
+    font-size: 14px !important;
+    background-color: #FFDADA !important;
+    padding: 0.5rem 0.75rem !important;
+    border-radius: 0.375rem !important;
+    margin-bottom: 1rem !important;
+  }
+  
+  /* Stack Auth - Card/Container styling */
+  [data-stack-component] [data-stack-card] {
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+  
+  /* Stack Auth - Dividers */
+  [data-stack-component] hr,
+  [data-stack-component] [data-stack-divider] {
+    border-color: #EDEDED !important;
+    margin: 1.5rem 0 !important;
+  }
+  
+  /* Stack Auth - Typography in forms */
+  [data-stack-component] h1,
+  [data-stack-component] h2,
+  [data-stack-component] h3 {
+    color: #2A2A2F !important;
+    font-weight: 600 !important;
+  }
+  
+  [data-stack-component] p {
+    color: #6C6C71 !important;
+  }
+  
+  /* Stack Auth - Account Settings specific */
+  [data-stack-component] [data-stack-account-settings] {
+    font-family: inherit !important;
+  }
+  
+  [data-stack-component] [data-stack-section] {
+    border: 1px solid #EDEDED !important;
+    border-radius: 0.5rem !important;
+    padding: 1.25rem !important;
+    margin-bottom: 1rem !important;
+  }
+  
+  /* Stack Auth - Avatar */
+  [data-stack-component] [data-stack-avatar] {
+    border-radius: 9999px !important;
+    border: 2px solid #EDEDED !important;
+  }
+  
+  /* Stack Auth - Loading spinner */
+  [data-stack-component] [data-stack-spinner] {
+    border-color: #E9EEFF !important;
+    border-top-color: #4A3AFF !important;
+  }
+}
+
 /* Custom utility classes */
 @layer utilities {
   .text-h1 {

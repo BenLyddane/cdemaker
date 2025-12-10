@@ -172,6 +172,8 @@ export function Sidebar({
   const hasResults = summary.totalItems > 0;
   const isProcessing = isExtracting || isComparing;
   const hasCompletedSpecs = specDocuments.some(d => d.status === "complete");
+  // Allow submittal upload anytime specs have been added (even during extraction)
+  const hasAnySpecs = specDocuments.length > 0;
   
   return (
     <aside 
@@ -331,8 +333,8 @@ export function Sidebar({
             )}
           </div>
           
-          {/* Step 2: Submittal Upload Section (only shows after spec extraction) */}
-          {hasCompletedSpecs && (
+          {/* Step 2: Optional Submittal Upload Section (shows anytime specs are added) */}
+          {hasAnySpecs && (
             <div className="p-4 border-b border-neutral-100">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
@@ -345,10 +347,21 @@ export function Sidebar({
                       submittalDocument ? "text-green-700" : "text-neutral-500"
                     )} />
                   </div>
-                  <h3 className="text-detail font-semibold text-neutral-700">
-                    Submittal
-                  </h3>
+                  <div>
+                    <h3 className="text-detail font-semibold text-neutral-700">
+                      Submittal
+                    </h3>
+                    <span className="text-micro text-neutral-400">
+                      {isExtracting ? "Upload while extracting" : "Optional"}
+                    </span>
+                  </div>
                 </div>
+                {isExtracting && submittalDocument && (
+                  <Badge variant="outline" className="text-micro bg-bv-blue-100 text-bv-blue-700 border-bv-blue-300">
+                    <Sparkles className="h-3 w-3 mr-1" />
+                    Auto-CDE
+                  </Badge>
+                )}
               </div>
               
               {/* Submittal Document Card */}
@@ -370,45 +383,33 @@ export function Sidebar({
                     compact
                   />
                   <p className="text-micro text-neutral-400 text-center mt-2">
-                    Upload manufacturer submittal for comparison
+                    {isExtracting 
+                      ? "Upload submittal to run AI CDE as data extracts"
+                      : "Upload submittal to enable AI comparison"
+                    }
                   </p>
                 </>
               )}
-            </div>
-          )}
-          
-          {/* Step 3: Create CDE Button */}
-          {hasCompletedSpecs && (
-            <div className="p-4 border-b border-neutral-100">
-              <Button
-                onClick={onCreateCDE}
-                disabled={!canCreateCDE}
-                className="w-full gap-2 bg-bv-blue-400 hover:bg-bv-blue-500"
-              >
-                {isComparing ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Creating CDE...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="h-4 w-4" />
-                    Create CDE
-                  </>
-                )}
-              </Button>
               
-              {!canCreateCDE && !isComparing && (
-                <p className="mt-2 text-micro text-neutral-400 text-center">
-                  {!submittalDocument 
-                    ? "Upload a submittal to create CDE" 
-                    : submittalDocument.status !== "complete"
-                    ? "Waiting for submittal processing..."
-                    : extractedRowCount === 0
-                    ? "No extracted data available"
-                    : "Ready to create CDE"
-                  }
-                </p>
+              {/* AI CDE Button - only when submittal is uploaded and not auto-running */}
+              {submittalDocument?.status === "complete" && !isExtracting && (
+                <Button
+                  onClick={onCreateCDE}
+                  disabled={isComparing || extractedRowCount === 0}
+                  className="w-full gap-2 bg-bv-blue-400 hover:bg-bv-blue-500 mt-3"
+                >
+                  {isComparing ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Running AI CDE...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4" />
+                      Run AI CDE
+                    </>
+                  )}
+                </Button>
               )}
             </div>
           )}

@@ -11,6 +11,11 @@ const isStackConfigured = Boolean(process.env.NEXT_PUBLIC_STACK_PROJECT_ID);
 export const stackServerApp = isStackConfigured
   ? new StackServerApp({
       tokenStore: "nextjs-cookie",
+      urls: {
+        signIn: "/sign-in",
+        signUp: "/sign-up",
+        accountSettings: "/account-settings",
+      },
     })
   : null;
 

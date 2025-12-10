@@ -14,7 +14,7 @@ export interface DocumentLocation {
   textSnippet?: string;
 }
 
-// Extracted data row with location tracking
+// Extracted data row with location tracking and CDE review fields
 export interface ExtractedRow {
   id: string;
   field: string;
@@ -26,6 +26,24 @@ export interface ExtractedRow {
   pageNumber: number;
   location?: DocumentLocation;
   rawText?: string;
+  
+  // CDE Review fields (always available for manual review)
+  cdeStatus?: CDEStatus;           // Comply/Deviate/Exception/Pending
+  cdeComment?: string;             // User or AI explanation
+  isReviewed?: boolean;            // Track if item has been reviewed
+  
+  // AI vs Human tracking
+  cdeSource?: "ai" | "human";      // Who made the CDE decision
+  aiSuggestedStatus?: CDEStatus;   // Original AI suggestion (preserved after human edit)
+  aiSuggestedComment?: string;     // Original AI explanation
+  humanConfirmedAt?: string;       // ISO timestamp when user confirmed/changed
+  isAiProcessing?: boolean;        // True while AI CDE is running for this row
+  
+  // Submittal reference (populated by AI CDE when submittal is provided)
+  submittalValue?: string;         // Value found in submittal
+  submittalUnit?: string;          // Unit from submittal
+  submittalLocation?: DocumentLocation;  // Location in submittal document
+  matchConfidence?: "high" | "medium" | "low" | "not_found";  // AI confidence in match
 }
 
 // CDE Status
