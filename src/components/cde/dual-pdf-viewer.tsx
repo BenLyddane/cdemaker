@@ -161,9 +161,9 @@ function SinglePdfPanel({
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-neutral-100 border-r border-neutral-200 last:border-r-0 min-w-0 overflow-hidden">
+    <div className="flex-1 flex flex-col bg-neutral-100 border-r border-neutral-200 last:border-r-0 min-w-0" style={{ minHeight: 0 }}>
       {/* Header */}
-      <div className={cn("px-3 py-2 border-b flex items-center justify-between shrink-0", bgColor)}>
+      <div className={cn("px-3 py-2 border-b flex items-center justify-between flex-shrink-0", bgColor)}>
         <span className={cn("text-detail font-semibold", titleColor)}>{title}</span>
         
         {/* Page navigation */}
@@ -192,36 +192,39 @@ function SinglePdfPanel({
         </div>
       </div>
       
-      {/* PDF Content - Scrollable container */}
+      {/* PDF Content - Scrollable container with explicit overflow */}
       <div 
         ref={containerRef}
-        className="flex-1 overflow-auto"
-        style={{
-          // Ensure scrollbars are visible and functional
-          overscrollBehavior: 'contain',
+        className="flex-1 bg-neutral-200"
+        style={{ 
+          minHeight: 0,
+          overflow: 'auto',
         }}
       >
-        {/* Inner wrapper for centering when content is smaller than viewport */}
+        {/* Content wrapper */}
         <div 
-          className="inline-block p-4"
-          style={{
+          className="p-4"
+          style={{ 
+            display: 'inline-block',
             minWidth: '100%',
             minHeight: '100%',
           }}
         >
           {currentPageData && (
             <div 
-              className="relative shadow-lg mx-auto"
+              className="relative shadow-lg bg-white"
               style={{
                 width: scaledWidth ? `${scaledWidth}px` : 'auto',
                 height: scaledHeight ? `${scaledHeight}px` : 'auto',
+                marginLeft: 'auto',
+                marginRight: 'auto',
               }}
             >
               <img
                 ref={imageRef}
                 src={`data:${currentPageData.mimeType};base64,${currentPageData.base64}`}
                 alt={`Page ${currentPage}`}
-                className="bg-white block"
+                className="block"
                 style={{ 
                   width: '100%',
                   height: '100%',
@@ -466,7 +469,7 @@ export function DualPdfViewer({
       {/* PDF Content Area */}
       {splitView ? (
         // Split view - show both side by side
-        <div className="flex-1 flex overflow-hidden min-h-0">
+        <div className="flex-1 flex" style={{ minHeight: 0, overflow: 'hidden' }}>
           <SinglePdfPanel
             title="Specification"
             titleColor="text-bv-blue-600"
@@ -500,7 +503,7 @@ export function DualPdfViewer({
         </div>
       ) : (
         // Single view - show one document
-        <div className="flex-1 overflow-hidden min-h-0">
+        <div className="flex-1" style={{ minHeight: 0, overflow: 'hidden' }}>
           {viewingDocument === "spec" ? (
             <SinglePdfPanel
               title="Specification"
