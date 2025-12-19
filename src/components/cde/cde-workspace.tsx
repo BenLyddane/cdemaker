@@ -283,9 +283,9 @@ export function CDEWorkspace() {
         
         console.log(`[AI CDE] Found ${allFindings.length} total findings for "${row.field}"`);
       } else {
-        // No findings - mark as exception with not_found
+        // No findings - mark as not_found
         updateRowWithAiResult(row.id, {
-          status: "exception",
+          status: "not_found",
           matchConfidence: "not_found",
           explanation: hasError ? "Search failed - please retry" : "No matching data found in submittal",
           findings: [],
@@ -864,6 +864,71 @@ export function CDEWorkspace() {
     });
   }, []);
   
+  // Retry AI CDE for a single row
+  const handleRetryAiCde = useCallback((rowId: string) => {
+    if (!submittalPagesRef.current || submittalPagesRef.current.length === 0) {
+      toast.error("No submittal uploaded", {
+        description: "Please upload a submittal document first.",
+      });
+      return;
+    }
+    
+    // Find the row and its document
+    let targetRow: ExtractedRow | null = null;
+    let targetDocId: string | null = null;
+    
+    for (const doc of specDocuments) {
+      const extraction = documentExtractions.get(doc.id);
+      const row = extraction?.rows.find(r => r.id === rowId);
+      if (row) {
+        targetRow = row;
+        targetDocId = doc.id;
+        break;
+      }
+    }
+    
+    if (!targetRow || !targetDocId) return;
+    
+    // Clear existing CDE results and queue for reprocessing
+    setDocumentExtractions(prev => {
+      const newMap = new Map(prev);
+      const extraction = prev.get(targetDocId!);
+      if (extraction) {
+        const newRows = extraction.rows.map(r => {
+          if (r.id === rowId) {
+            return {
+              ...r,
+              cdeStatus: undefined,
+              cdeComment: undefined,
+              cdeSource: undefined,
+              aiSuggestedStatus: undefined,
+              aiSuggestedComment: undefined,
+              submittalValue: undefined,
+              submittalUnit: undefined,
+              submittalLocation: undefined,
+              matchConfidence: undefined,
+              submittalFindings: undefined,
+              activeFindingIndex: undefined,
+              isReviewed: false,
+              isAiProcessing: true,
+            };
+          }
+          return r;
+        });
+        newMap.set(targetDocId!, { ...extraction, rows: newRows });
+      }
+      return newMap;
+    });
+    
+    // Queue just this single row for processing
+    aiCdeQueueRef.current.push(targetRow);
+    processAiCdeQueue();
+    
+    toast.info("Retrying AI CDE", {
+      description: `Re-analyzing "${targetRow.field.slice(0, 30)}${targetRow.field.length > 30 ? '...' : ''}"`,
+    });
+  }, [specDocuments, documentExtractions, processAiCdeQueue]);
+  
   // Accept AI decision - marks the AI suggestion as human-reviewed
   const handleAcceptAiDecision = useCallback((rowId: string) => {
     setDocumentExtractions(prev => {
@@ -1027,10 +1092,11 @@ export function CDEWorkspace() {
     const comply = allExtractedRows.filter(r => r.cdeStatus === "comply").length;
     const deviate = allExtractedRows.filter(r => r.cdeStatus === "deviate").length;
     const exception = allExtractedRows.filter(r => r.cdeStatus === "exception").length;
-    const pending = total - comply - deviate - exception;
+    const notFound = allExtractedRows.filter(r => r.cdeStatus === "not_found").length;
+    const pending = total - comply - deviate - exception - notFound;
     const reviewed = allExtractedRows.filter(r => r.isReviewed).length;
     
-    return { totalItems: total, comply, deviate, exception, pending, reviewed };
+    return { totalItems: total, comply, deviate, exception, pending, reviewed, notFound };
   }, [allExtractedRows]);
   
   // Use extracted rows summary if no AI comparison done, otherwise use comparison summary
@@ -1396,6 +1462,7 @@ export function CDEWorkspace() {
                 onCommentChange={handleExtractedRowCommentChange}
                 onAcceptAiDecision={handleAcceptAiDecision}
                 onActiveFindingChange={handleActiveFindingChange}
+                onRetryAiCde={handleRetryAiCde}
                 isLoading={isExtracting}
                 isAiCdeProcessing={isAiCdeProcessing}
                 extractionProgress={extractionProgress}

@@ -66,7 +66,7 @@ export interface ExtractedRow {
 }
 
 // CDE Status
-export type CDEStatus = "comply" | "deviate" | "exception" | "pending";
+export type CDEStatus = "comply" | "deviate" | "exception" | "pending" | "not_found";
 
 // Comparison result for a single data point
 export interface ComparisonResult {

@@ -38,6 +38,8 @@ import {
   ArrowRight,
   Keyboard,
   Layers,
+  RotateCw,
+  HelpCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ExtractedRow, CDEStatus, SubmittalFinding } from "@/lib/types";
@@ -54,6 +56,7 @@ interface ExtractedDataPanelProps {
   onCommentChange?: (rowId: string, comment: string) => void;
   onAcceptAiDecision?: (rowId: string) => void;
   onActiveFindingChange?: (rowId: string, findingIndex: number) => void;
+  onRetryAiCde?: (rowId: string) => void;
   isLoading: boolean;
   isAiCdeProcessing?: boolean;
   selectedRowId: string | null;
@@ -68,7 +71,13 @@ type StatusFilter = "all" | CDEStatus | "unreviewed";
 type SortField = "field" | "page" | "confidence" | "specNumber" | "status";
 
 // CDE Status Quick Select Component
-const statusConfig = {
+const statusConfig: Record<CDEStatus, {
+  icon: typeof CheckCircle2;
+  label: string;
+  shortLabel: string;
+  className: string;
+  activeClassName: string;
+}> = {
   comply: {
     icon: CheckCircle2,
     label: "Comply",
@@ -96,6 +105,13 @@ const statusConfig = {
     shortLabel: "P",
     className: "bg-neutral-100 text-neutral-600 border-neutral-300 hover:bg-neutral-200",
     activeClassName: "ring-2 ring-neutral-400",
+  },
+  not_found: {
+    icon: HelpCircle,
+    label: "Not Found",
+    shortLabel: "?",
+    className: "bg-purple-100 text-purple-700 border-purple-400 hover:bg-purple-200",
+    activeClassName: "ring-2 ring-purple-400",
   },
 };
 
@@ -265,6 +281,7 @@ interface DataRowProps {
   onCommentChange?: (comment: string) => void;
   onAcceptAiDecision?: () => void;
   onActiveFindingChange?: (findingIndex: number) => void;
+  onRetryAiCde?: () => void;
   hasSubmittal?: boolean;
 }
 
@@ -280,6 +297,7 @@ function DataRow({
   onCommentChange,
   onAcceptAiDecision,
   onActiveFindingChange,
+  onRetryAiCde,
   hasSubmittal,
 }: DataRowProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -645,6 +663,20 @@ function DataRow({
             >
               <Eye className="h-4 w-4" />
             </Button>
+            {/* Retry AI CDE button - show for not_found or when submittal exists but no match */}
+            {onRetryAiCde && hasSubmittal && !row.isAiProcessing && (
+              (row.cdeStatus === "not_found" || (!row.submittalValue && !row.submittalFindings?.length)) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 text-purple-400 hover:text-purple-600 hover:bg-purple-100"
+                  onClick={onRetryAiCde}
+                  title="Retry AI CDE search"
+                >
+                  <RotateCw className="h-3 w-3" />
+                </Button>
+              )
+            )}
             {onEdit && (
               <Button
                 variant="ghost"
@@ -685,6 +717,7 @@ export function ExtractedDataPanel({
   onCommentChange,
   onAcceptAiDecision,
   onActiveFindingChange,
+  onRetryAiCde,
   isLoading,
   isAiCdeProcessing = false,
   selectedRowId,
@@ -1136,6 +1169,7 @@ export function ExtractedDataPanel({
                 onCommentChange={onCommentChange ? (comment) => onCommentChange(row.id, comment) : undefined}
                 onAcceptAiDecision={onAcceptAiDecision ? () => onAcceptAiDecision(row.id) : undefined}
                 onActiveFindingChange={onActiveFindingChange ? (index) => onActiveFindingChange(row.id, index) : undefined}
+                onRetryAiCde={onRetryAiCde ? () => onRetryAiCde(row.id) : undefined}
                 hasSubmittal={hasSubmittal}
               />
             ))}
