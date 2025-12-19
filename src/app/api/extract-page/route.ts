@@ -3,7 +3,7 @@ import { GoogleGenerativeAI, Part } from "@google/generative-ai";
 import type { ExtractedRow } from "@/lib/types";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY || "");
-const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;

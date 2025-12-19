@@ -520,16 +520,43 @@ export function CDEWorkspace() {
           if (result.success && result.data) {
             const { rows, rowCount, pageContent } = result.data;
             
+            console.log(`[Extraction] Page ${pageNum} returned ${rowCount} rows:`, rows);
+            
             if (rows && rows.length > 0) {
-              // Incrementally add rows
+              // Incrementally add rows - use timestamp to ensure unique IDs
+              const timestampedRows = rows.map((row: ExtractedRow, idx: number) => ({
+                ...row,
+                id: `${doc.id}-page${pageNum}-row${idx}-${Date.now()}`,
+              }));
+              
+              console.log(`[Extraction] Adding ${timestampedRows.length} rows to doc ${doc.id}`);
+              
               setDocumentExtractions(prev => {
                 const current = prev.get(doc.id);
-                if (!current) return prev;
+                if (!current) {
+                  console.warn(`[Extraction] No extraction found for doc ${doc.id}, creating new one`);
+                  // Create a new extraction if it doesn't exist
+                  const newMap = new Map(prev);
+                  newMap.set(doc.id, {
+                    rows: timestampedRows,
+                    metadata: {
+                      documentType: "specification" as const,
+                      totalRows: timestampedRows.length,
+                      totalPages: pages.length,
+                      extractedAt: new Date().toISOString(),
+                      processingTime: 0,
+                    },
+                    pageResults: [],
+                  });
+                  return newMap;
+                }
                 const newMap = new Map(prev);
+                const newRows = [...current.rows, ...timestampedRows];
+                console.log(`[Extraction] Updated doc ${doc.id}: ${current.rows.length} -> ${newRows.length} rows`);
                 newMap.set(doc.id, {
                   ...current,
-                  rows: [...current.rows, ...rows],
-                  metadata: { ...current.metadata, totalRows: current.rows.length + rows.length },
+                  rows: newRows,
+                  metadata: { ...current.metadata, totalRows: newRows.length },
                 });
                 return newMap;
               });
