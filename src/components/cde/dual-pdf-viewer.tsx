@@ -261,15 +261,25 @@ export function DualPdfViewer({
   onDocumentChange,
   selectedRow,
 }: DualPdfViewerProps) {
-  const [zoom, setZoom] = useState(100);
+  // Start at 50% zoom in split view, 100% in single view
+  const [zoom, setZoom] = useState(splitView ? 50 : 100);
   const [rotation, setRotation] = useState(0);
 
+  // Update zoom when split view mode changes
+  useEffect(() => {
+    if (splitView) {
+      setZoom(50); // Fit full page in split view
+    } else {
+      setZoom(100); // Full size in single view
+    }
+  }, [splitView]);
+
   const handleZoomIn = () => setZoom(prev => Math.min(prev + 25, 200));
-  const handleZoomOut = () => setZoom(prev => Math.max(prev - 25, 50));
+  const handleZoomOut = () => setZoom(prev => Math.max(prev - 25, 25)); // Allow down to 25%
   const handleRotate = () => setRotation(prev => (prev + 90) % 360);
 
-  // In split view, adjust zoom for smaller panels
-  const effectiveZoom = splitView ? Math.min(zoom, 100) : zoom;
+  // Use zoom directly - we now set appropriate defaults per mode
+  const effectiveZoom = zoom;
 
   return (
     <div className="h-full flex flex-col bg-neutral-100">
@@ -343,34 +353,13 @@ export function DualPdfViewer({
           )}
         </div>
         
-        {/* Center: Selected row info */}
-        {selectedRow && (
-          <div className="flex items-center gap-2 text-detail">
-            <span className="font-semibold text-neutral-800">{selectedRow.field}</span>
-            <span className="text-neutral-400">|</span>
-            <span className="text-neutral-600">
-              {selectedRow.value}
-              {selectedRow.unit && ` ${selectedRow.unit}`}
-            </span>
-            {selectedRow.submittalValue && (
-              <>
-                <span className="text-neutral-400">→</span>
-                <span className="text-purple-600">
-                  {selectedRow.submittalValue}
-                  {selectedRow.submittalUnit && ` ${selectedRow.submittalUnit}`}
-                </span>
-              </>
-            )}
-          </div>
-        )}
-        
         {/* Right: Zoom controls */}
         <div className="flex items-center gap-2">
           <Button
             variant="ghost"
             size="sm"
             onClick={handleZoomOut}
-            disabled={zoom <= 50}
+            disabled={zoom <= 25}
             className="h-7 w-7 p-0"
           >
             <ZoomOut className="h-3.5 w-3.5" />

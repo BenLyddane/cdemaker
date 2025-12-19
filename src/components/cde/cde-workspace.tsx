@@ -79,6 +79,7 @@ export function CDEWorkspace() {
   // AI CDE processing queue
   const aiCdeQueueRef = useRef<ExtractedRow[]>([]);
   const aiCdeProcessingRef = useRef<boolean>(false);
+  const aiCdePausedRef = useRef<boolean>(false);
   const submittalPagesRef = useRef<PageData[] | null>(null);
   
   // View state
@@ -317,15 +318,37 @@ export function CDEWorkspace() {
     if (!submittalPagesRef.current) return;
 
     aiCdeProcessingRef.current = true;
+    aiCdePausedRef.current = false; // Reset pause flag when starting
     const submittalPages = submittalPagesRef.current;
 
-    while (aiCdeQueueRef.current.length > 0) {
+    while (aiCdeQueueRef.current.length > 0 && !aiCdePausedRef.current) {
       const row = aiCdeQueueRef.current.shift();
       if (row) {
         await processRowWithAiCde(row, submittalPages);
         // Small delay between requests to avoid rate limiting
         await new Promise(resolve => setTimeout(resolve, 200));
       }
+    }
+
+    // If paused, clear remaining queue and mark rows as not processing
+    if (aiCdePausedRef.current && aiCdeQueueRef.current.length > 0) {
+      const remainingRowIds = aiCdeQueueRef.current.map(r => r.id);
+      aiCdeQueueRef.current = []; // Clear the queue
+      
+      // Mark remaining rows as no longer processing
+      setDocumentExtractions(prev => {
+        const newMap = new Map(prev);
+        for (const [docId, extraction] of newMap.entries()) {
+          const hasRemainingRows = extraction.rows.some(r => remainingRowIds.includes(r.id));
+          if (hasRemainingRows) {
+            const newRows = extraction.rows.map(r => 
+              remainingRowIds.includes(r.id) ? { ...r, isAiProcessing: false } : r
+            );
+            newMap.set(docId, { ...extraction, rows: newRows });
+          }
+        }
+        return newMap;
+      });
     }
 
     aiCdeProcessingRef.current = false;
@@ -1098,8 +1121,16 @@ export function CDEWorkspace() {
     }
   }, [allExtractedRows, specDocuments, documentPages, submittalDocument, currentProjectName]);
   
-  // Pause extraction handler
+  // Check if AI CDE is actively processing
+  const isAiCdeProcessing = useMemo(() => {
+    return allExtractedRows.some(r => r.isAiProcessing);
+  }, [allExtractedRows]);
+
+  // Pause handler - stops both extraction AND AI CDE processing
   const handlePauseExtraction = useCallback(() => {
+    let paused = false;
+    
+    // Pause extraction if running
     if (extractionAbortRef.current && isExtracting) {
       // Store current progress for potential resume
       const currentDoc = specDocuments.find(d => d.status === "extracting");
@@ -1112,7 +1143,6 @@ export function CDEWorkspace() {
       
       // Abort the extraction
       extractionAbortRef.current.abort();
-      setIsPaused(true);
       setIsExtracting(false);
       
       // Update document status to paused
@@ -1122,10 +1152,41 @@ export function CDEWorkspace() {
         ));
       }
       
-      addLog("Extraction paused - data saved", "warning");
+      paused = true;
+    }
+    
+    // Also pause AI CDE processing if running
+    if (isAiCdeProcessing || aiCdeQueueRef.current.length > 0) {
+      aiCdePausedRef.current = true;
+      
+      // Clear the queue and mark all processing rows as not processing
+      const queuedRowIds = aiCdeQueueRef.current.map(r => r.id);
+      aiCdeQueueRef.current = [];
+      
+      // Mark queued rows as no longer processing
+      setDocumentExtractions(prev => {
+        const newMap = new Map(prev);
+        for (const [docId, extraction] of newMap.entries()) {
+          const hasProcessingRows = extraction.rows.some(r => r.isAiProcessing || queuedRowIds.includes(r.id));
+          if (hasProcessingRows) {
+            const newRows = extraction.rows.map(r => 
+              (r.isAiProcessing || queuedRowIds.includes(r.id)) ? { ...r, isAiProcessing: false } : r
+            );
+            newMap.set(docId, { ...extraction, rows: newRows });
+          }
+        }
+        return newMap;
+      });
+      
+      paused = true;
+    }
+    
+    if (paused) {
+      setIsPaused(true);
+      addLog("Processing paused - data saved", "warning");
       setWorkflowPhase("reviewing");
     }
-  }, [isExtracting, specDocuments, extractionProgress, addLog]);
+  }, [isExtracting, isAiCdeProcessing, specDocuments, extractionProgress, addLog]);
   
   // Resume extraction handler (note: full resume requires backend support for page-based extraction)
   const handleResumeExtraction = useCallback(() => {
@@ -1336,6 +1397,7 @@ export function CDEWorkspace() {
                 onAcceptAiDecision={handleAcceptAiDecision}
                 onActiveFindingChange={handleActiveFindingChange}
                 isLoading={isExtracting}
+                isAiCdeProcessing={isAiCdeProcessing}
                 extractionProgress={extractionProgress}
                 hasSubmittal={!!submittalDocument}
                 onPause={handlePauseExtraction}

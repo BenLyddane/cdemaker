@@ -75,51 +75,57 @@ SPECIFICATION REQUIREMENT TO VERIFY:
 - Section: ${specRow.section || "General"}
 - Spec Number: ${specRow.specNumber || "N/A"}
 
-TASK: Search through ALL ${submittalPages.length} submittal pages provided (pages ${batchStartPage} to ${batchStartPage + submittalPages.length - 1}) and find EVERY occurrence where this specification field appears. Return ALL matches found.
+TASK: Search the ${submittalPages.length} submittal pages (pages ${batchStartPage}-${batchStartPage + submittalPages.length - 1}) for the value that DIRECTLY ANSWERS this specification requirement.
 
-FIELD TYPE RULES:
-1. EXACT MATCH required for: Voltage, Phase, Model numbers, Part numbers, Dimensions, Connection sizes
-2. HIGHER IS BETTER (exceed = comply): Ratings (salt spray, corrosion), Efficiency %, Warranty, Pressure ratings, Certifications count
-3. LOWER IS BETTER (below = comply): Noise level (dB), Power consumption (watts)
-4. MATCH OR CLOSE: Flow rates, Capacity (±5% acceptable)
+=== CRITICAL ACCURACY REQUIREMENTS ===
+1. ONLY return findings that DIRECTLY answer the specification requirement
+2. The value MUST be for the EXACT equipment/item being specified, not similar items
+3. DO NOT include values for:
+   - Different models or product variants
+   - Optional accessories or add-ons
+   - Different sizes or configurations
+   - Adjacent or loosely related data
+4. If uncertain whether a value directly answers the spec - DO NOT INCLUDE IT
+5. QUALITY over QUANTITY: 1 perfect match is better than 10 loosely related ones
+6. The finding must answer the question: "Does this submittal meet this specific requirement?"
 
-COMPLIANCE STATUS FOR EACH FINDING:
-- "comply": Submittal value matches OR exceeds spec (where higher is better) OR is below spec (where lower is better)
-- "deviate": Values differ slightly, may be acceptable with engineering review
-- "exception": Values incompatible, missing, or wrong direction
+=== FIELD MATCHING RULES ===
+- EXACT MATCH required for: Voltage, Phase, Model numbers, Part numbers, Dimensions, Connection sizes
+- HIGHER IS BETTER (exceed = comply): Efficiency %, Warranty, Pressure ratings, Certifications
+- LOWER IS BETTER (below = comply): Noise level (dB), Power consumption
+- TOLERANCE MATCH: Flow rates, Capacity (±5% acceptable)
 
-CRITICAL - BOUNDING BOX REQUIREMENT:
-For EACH finding, you MUST provide a bounding box. The bounding box should surround the specific value/text you found.
-- x: normalized distance from LEFT edge (0 = left edge, 1 = right edge)
-- y: normalized distance from TOP edge (0 = top edge, 1 = bottom edge)
-- width/height: normalized size of the box
-Estimate coordinates based on where the value appears in the page image. Be precise!
+=== COMPLIANCE STATUS ===
+- "comply": Submittal value definitively meets or exceeds the spec requirement
+- "deviate": Values differ but may be acceptable with engineering review
+- "exception": Values are incompatible, wrong, or missing
+
+=== BOUNDING BOX REQUIREMENT ===
+For EACH finding, provide a bounding box around the specific value found:
+- x: distance from LEFT edge (0-1 normalized)
+- y: distance from TOP edge (0-1 normalized)
+- width/height: size of box (0-1 normalized)
 
 RESPOND WITH STRICT JSON:
 {
   "findings": [
     {
-      "pageNumber": <actual page number where found>,
-      "value": "<exact value found in submittal>",
-      "unit": "<unit if present, or null>",
+      "pageNumber": <page number where found>,
+      "value": "<exact value found>",
+      "unit": "<unit or null>",
       "confidence": "high" | "medium" | "low",
       "status": "comply" | "deviate" | "exception",
-      "boundingBox": {
-        "x": <float 0-1>,
-        "y": <float 0-1>,
-        "width": <float 0-1>,
-        "height": <float 0-1>
-      },
+      "boundingBox": { "x": <0-1>, "y": <0-1>, "width": <0-1>, "height": <0-1> },
       "explanation": "Brief explanation (max 15 words)"
     }
   ]
 }
 
 IMPORTANT:
-- Return ALL occurrences found, not just the first one
-- If nothing found in these pages, return {"findings": []}
-- Each finding must have a valid pageNumber from the range ${batchStartPage}-${batchStartPage + submittalPages.length - 1}
-- boundingBox is REQUIRED for each finding`;
+- Only return findings with HIGH confidence that they directly answer the spec
+- If nothing DIRECTLY relevant is found, return {"findings": []}
+- Maximum 1-2 findings per spec (the most relevant only)
+- pageNumber must be in range ${batchStartPage}-${batchStartPage + submittalPages.length - 1}`;
 
     // Create image parts with page number labels
     const imageParts: Part[] = submittalPages.map((page, idx) => ({

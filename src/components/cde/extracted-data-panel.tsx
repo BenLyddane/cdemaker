@@ -55,6 +55,7 @@ interface ExtractedDataPanelProps {
   onAcceptAiDecision?: (rowId: string) => void;
   onActiveFindingChange?: (rowId: string, findingIndex: number) => void;
   isLoading: boolean;
+  isAiCdeProcessing?: boolean;
   selectedRowId: string | null;
   extractionProgress?: ExtractionProgress | null;
   hasSubmittal?: boolean;
@@ -685,6 +686,7 @@ export function ExtractedDataPanel({
   onAcceptAiDecision,
   onActiveFindingChange,
   isLoading,
+  isAiCdeProcessing = false,
   selectedRowId,
   extractionProgress,
   hasSubmittal = false,
@@ -925,7 +927,29 @@ export function ExtractedDataPanel({
                     size="sm"
                     onClick={onPause}
                     className="h-6 px-2 text-micro gap-1 ml-2 text-yellow-700 border-yellow-400 hover:bg-yellow-100"
-                    title="Pause extraction - data will be saved"
+                    title="Pause all processing - data will be saved"
+                  >
+                    <Pause className="h-3 w-3" />
+                    Pause
+                  </Button>
+                )}
+              </div>
+            ) : isAiCdeProcessing ? (
+              <div className="flex items-center gap-2 mt-1">
+                <div className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
+                <span className="text-micro text-purple-600">
+                  AI CDE analyzing submittal...
+                </span>
+                <span className="text-micro text-neutral-400">
+                  ({rows.filter(r => r.isAiProcessing).length} remaining)
+                </span>
+                {onPause && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={onPause}
+                    className="h-6 px-2 text-micro gap-1 ml-2 text-yellow-700 border-yellow-400 hover:bg-yellow-100"
+                    title="Pause AI CDE - data will be saved"
                   >
                     <Pause className="h-3 w-3" />
                     Pause
