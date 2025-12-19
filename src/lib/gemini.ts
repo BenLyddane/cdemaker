@@ -43,22 +43,48 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * Create a detailed extraction prompt for complete CDE-able requirements
+ * 
+ * This prompt is designed to mimic how a mechanical or electrical engineer
+ * would review specification documents - understanding context and scope first,
+ * then extracting actionable requirements.
  */
 function createExtractionPrompt(
   documentType: "specification" | "schedule" | "submittal",
   pageNumber: number,
   totalPages: number
 ): string {
-  const basePrompt = `You are an expert construction document analyzer extracting requirements for a Comply/Deviate/Exception (CDE) review process.
+  const basePrompt = `You are an expert mechanical/electrical engineer reviewing construction specification documents for a Comply/Deviate/Exception (CDE) review process.
 
 DOCUMENT INFO:
 - Type: ${documentType}
 - Page: ${pageNumber} of ${totalPages}
 
-YOUR GOAL: Extract COMPLETE, MEANINGFUL REQUIREMENTS that a reviewer can mark as Comply, Deviate, or Exception when comparing to submittals.
+=== ENGINEER'S REVIEW APPROACH ===
+Review this page as an experienced engineer would:
+1. FIRST: Scan for SCOPE and EXCLUSIONS - identify what IS and IS NOT included
+2. SECOND: Identify applicable requirements within scope
+3. THIRD: Extract complete, actionable requirements
 
-WHAT TO EXTRACT:
-Each extracted item should be a COMPLETE requirement that stands alone. Consolidate related information into single items.
+=== CRITICAL: RECOGNIZE EXCLUSIONS ===
+⚠️ IMPORTANT: Many specification documents contain sections marked as EXCLUDED from scope.
+Look for indicators such as:
+- "NOT INCLUDED" / "NOT IN CONTRACT" / "NIC"
+- "EXCLUDED" / "EXCLUSION"
+- "N/A" / "NOT APPLICABLE" 
+- "BY OTHERS" / "OWNER FURNISHED"
+- "DELETED" / "NOT USED"
+- Struck-through text or [DELETED] markers
+- Items marked with asterisks (*) indicating exclusions per project notes
+- Schedules with blank cells or "---" indicating not required
+- Sections that reference "See Division XX" (work is elsewhere)
+
+When you find exclusions:
+1. DO NOT extract requirements from excluded sections
+2. Note the exclusion in pageContent.exclusions array
+3. Still extract requirements from NON-excluded sections on the same page
+
+=== WHAT TO EXTRACT ===
+Extract COMPLETE, MEANINGFUL REQUIREMENTS that a reviewer can mark as Comply, Deviate, or Exception.
 
 Examples of GOOD extractions (complete, CDE-able):
 - "Electrical Requirements" → "120V/1-phase/60Hz, 15 amp dedicated circuit required"
@@ -72,12 +98,14 @@ Examples of BAD extractions (too fragmented):
 - "Voltage" → "120" (too fragmented - combine with related electrical specs)
 - "CFM" → "2000" (missing context - include full performance requirement)
 - "1.2" → "SUBMITTALS" (just a section header, not a requirement)
+- Items from "NOT INCLUDED" sections (should be skipped entirely!)
 
-EXTRACTION RULES:
+=== EXTRACTION RULES ===
 1. Extract COMPLETE requirements - each row should be something reviewable
 2. CONSOLIDATE related specs (electrical together, dimensions together, etc.)
 3. Include the FULL requirement text, not just values
-4. **ABSOLUTELY CRITICAL - FULL SPECIFICATION NUMBER EXTRACTION:**
+4. SKIP any requirements that are marked as excluded/not included
+5. **ABSOLUTELY CRITICAL - FULL SPECIFICATION NUMBER EXTRACTION:**
    
    ⚠️ IMPORTANT: You MUST ALWAYS include the FULL specification reference path, not just the section number!
    
@@ -103,30 +131,18 @@ EXTRACTION RULES:
    5. Add item numbers if present (1, 2, 3...)
    6. Add sub-letters if present (a, b, c...)
    
-   EXAMPLE - Looking at this document structure:
-   
-   SECTION 23 70 00 - AIR HANDLING
-   PART 1 - GENERAL
-     1.4 SUBMITTALS
-       A. Prepare submissions...
-       B. Shop Drawings
-         1. Air Handling Equipment...
-         2. Fans...
-   
-   For "Shop Drawings" → specNumber: "23 70 00 1.4.B"
-   For "Air Handling Equipment" item → specNumber: "23 70 00 1.4.B.1"
-   For "Fans" item → specNumber: "23 70 00 1.4.B.2"
-   
    ⚠️ NEVER RETURN JUST THE SECTION NUMBER! Always include 1.4.B or similar suffix!
 
-5. Include warranty requirements, notes, submittal requirements, performance specs, etc.
-6. For SCHEDULES/TABLES:
+6. Include warranty requirements, notes, submittal requirements, performance specs
+7. For SCHEDULES/TABLES:
    - Extract each row of the schedule as a separate item
    - Include the TABLE/SCHEDULE TITLE as the section name
    - Include ALL column headers in a meaningful way for the field name
-   - The specNumber should reference the schedule location, e.g., "23 84 15 SCHEDULE A Row 1"
+   - The specNumber should reference the schedule location
+   - SKIP rows that are blank, marked "---", or "N/A"
+   - Pay attention to footnotes that indicate exclusions
 
-BOUNDING BOX INSTRUCTIONS:
+=== BOUNDING BOX INSTRUCTIONS ===
 For each extracted item, provide the bounding box coordinates as NORMALIZED values (0.0 to 1.0):
 - x: left edge as fraction of page width (0.0 = left edge, 1.0 = right edge)
 - y: top edge as fraction of page height (0.0 = top edge, 1.0 = bottom edge)  
@@ -135,12 +151,20 @@ For each extracted item, provide the bounding box coordinates as NORMALIZED valu
 
 The bounding box should encompass the ENTIRE text for that requirement.
 
-OUTPUT FORMAT (strict JSON):
+=== OUTPUT FORMAT (strict JSON) ===
 {
   "pageContent": {
     "hasData": true/false,
     "specNumber": "XX XX XX (main section number from header/footer)",
-    "specTitle": "Section title if visible"
+    "specTitle": "Section title if visible",
+    "exclusions": [
+      {
+        "type": "NOT_INCLUDED" | "BY_OTHERS" | "DELETED" | "N/A" | "OTHER",
+        "description": "Brief description of what is excluded",
+        "affectedItems": ["Item 1", "Item 2"]
+      }
+    ],
+    "scopeNotes": "Any important scope context (e.g., 'This section covers Type A units only')"
   },
   "rows": [
     {
@@ -156,21 +180,26 @@ OUTPUT FORMAT (strict JSON):
         "width": 0.0-1.0,
         "height": 0.0-1.0
       },
-      "rawText": "Original text verbatim if significantly different from parsed value"
+      "rawText": "Original text verbatim if significantly different from parsed value",
+      "isConditional": false,
+      "conditions": null
     }
   ]
 }
 
-CONFIDENCE LEVELS:
-- "high": Text is clear, requirement is unambiguous
+=== CONFIDENCE LEVELS ===
+- "high": Text is clear, requirement is unambiguous, clearly in scope
 - "medium": Slightly unclear but interpretation is reasonable
-- "low": Text quality poor or requirement meaning uncertain
+- "low": Text quality poor, requirement meaning uncertain, or scope is ambiguous
 
-IMPORTANT:
-- If a page has no extractable requirements (blank, cover page, TOC with no specs), return {"pageContent": {"hasData": false}, "rows": []}
+=== IMPORTANT RULES ===
+- If a page has no extractable requirements (blank, cover page, TOC, or ALL items excluded), return:
+  {"pageContent": {"hasData": false, "exclusions": [...if any...], "scopeNotes": "..."}, "rows": []}
 - DO NOT extract page headers/footers as requirements unless they contain spec data
+- DO NOT extract items from sections marked as NOT INCLUDED or excluded
 - Prefer FEWER, MORE COMPLETE items over MANY FRAGMENTED items
-- Each row should answer: "What requirement does the submittal need to meet?"`;
+- Each row should answer: "What requirement does the submittal need to meet?"
+- If entire page is "NOT INCLUDED", set hasData: false and document in exclusions`;
 
   return basePrompt;
 }

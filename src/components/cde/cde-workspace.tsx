@@ -50,6 +50,10 @@ const TARGET_BATCH_SIZE_BYTES = 3 * 1024 * 1024; // 3MB target (safe margin)
 const MIN_PAGES_PER_BATCH = 1;
 const MAX_PAGES_PER_BATCH = 15; // Cap to avoid overly large API calls
 const ROWS_PER_BATCH = 5; // Process 5 spec rows per API call for 5x speedup
+const SPECS_PER_PAGE_DETECT = 10; // How many specs to process in one page detection call
+
+// Two-phase processing mode
+type ProcessingMode = "full-scan" | "two-phase";
 
 /**
  * Create optimal batches of pages based on their actual base64 sizes

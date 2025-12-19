@@ -3,8 +3,9 @@ import { GoogleGenerativeAI, Part } from "@google/generative-ai";
 import type { ExtractedRow, CDEStatus, DocumentLocation, SubmittalFinding, BoundingBox } from "@/lib/types";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY || "");
-// Using gemini-3-flash-preview for speed ($0.50/$3) vs pro ($2/$12)
-const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+// Using Gemini 3 Pro for accurate bounding box extraction ($2/$12)
+// Phase 2 detailed extraction requires higher accuracy for precise highlighting
+const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
 
 // Configuration
 const MAX_RETRIES = 3;
@@ -267,11 +268,12 @@ interface BatchInfo {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { specRow, submittalPages, scanAllPages = true, batchInfo } = body as {
+    const { specRow, submittalPages, scanAllPages = true, batchInfo, targetPages } = body as {
       specRow: ExtractedRow;
       submittalPages: PageImage[];
       scanAllPages?: boolean; // If false, process only the pages provided (client-side batching)
       batchInfo?: BatchInfo; // Client-side batching metadata
+      targetPages?: number[]; // Phase 2: Only scan these specific pages (from page detection)
     };
 
     if (!specRow) {
@@ -295,24 +297,37 @@ export async function POST(request: NextRequest) {
     } else {
       console.log(`[compare-single] Comparing: ${specRow.field} = ${specRow.value}`);
       console.log(`[compare-single] Total submittal pages: ${submittalPages.length}, scanAllPages: ${scanAllPages}`);
+      if (targetPages && targetPages.length > 0) {
+        console.log(`[compare-single] Phase 2 targeted extraction: only pages ${targetPages.join(', ')}`);
+      }
     }
     
     // Collect all findings from all batches
     const allFindings: SubmittalFinding[] = [];
     const errors: string[] = [];
     
-    // Determine how many pages to check
-    const pagesToCheck = scanAllPages ? submittalPages.length : Math.min(MAX_PAGES_PER_BATCH, submittalPages.length);
-    const totalBatches = Math.ceil(pagesToCheck / MAX_PAGES_PER_BATCH);
+    // Determine which pages to check
+    // Phase 2: If targetPages is provided, filter to only those pages (from page detection)
+    let pagesToProcess = submittalPages;
+    if (targetPages && targetPages.length > 0) {
+      const targetSet = new Set(targetPages);
+      pagesToProcess = submittalPages.filter(p => targetSet.has(p.pageNumber));
+      console.log(`[compare-single] Filtered to ${pagesToProcess.length} targeted pages (from ${submittalPages.length} total)`);
+    } else if (!scanAllPages) {
+      // Limit pages if not scanning all
+      pagesToProcess = submittalPages.slice(0, MAX_PAGES_PER_BATCH);
+    }
+    
+    const totalBatches = Math.ceil(pagesToProcess.length / MAX_PAGES_PER_BATCH);
     
     // Process pages in batches
     for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
       const startIdx = batchIdx * MAX_PAGES_PER_BATCH;
-      const endIdx = Math.min(startIdx + MAX_PAGES_PER_BATCH, pagesToCheck);
-      const batchPages = submittalPages.slice(startIdx, endIdx);
+      const endIdx = Math.min(startIdx + MAX_PAGES_PER_BATCH, pagesToProcess.length);
+      const batchPages = pagesToProcess.slice(startIdx, endIdx);
       const batchStartPage = batchPages[0]?.pageNumber || (startIdx + 1);
       
-      console.log(`[compare-single] Processing batch ${batchIdx + 1}/${totalBatches} (pages ${batchStartPage}-${batchStartPage + batchPages.length - 1})`);
+      console.log(`[compare-single] Processing batch ${batchIdx + 1}/${totalBatches} (pages ${batchPages.map(p => p.pageNumber).join(', ')})`);
       
       const batchResult = await compareSpecToBatch(specRow, batchPages, batchStartPage);
       
@@ -379,7 +394,8 @@ export async function POST(request: NextRequest) {
         
         // Processing stats
         batchesProcessed: totalBatches,
-        pagesScanned: pagesToCheck,
+        pagesScanned: pagesToProcess.length,
+        targetedPages: targetPages && targetPages.length > 0 ? targetPages : undefined,
         errors: errors.length > 0 ? errors : undefined,
       },
     });

@@ -3,8 +3,9 @@ import { GoogleGenerativeAI, Part } from "@google/generative-ai";
 import type { ExtractedRow, CDEStatus, SubmittalFinding, BoundingBox } from "@/lib/types";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY || "");
-// Using gemini-3-flash-preview for speed ($0.50/$3) - processes multiple rows in one call
-const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+// Using Gemini 3 Pro for accurate bounding box extraction ($2/$12)
+// Batch processing still benefits from Pro's better spatial accuracy
+const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
 
 // Configuration
 const MAX_RETRIES = 3;

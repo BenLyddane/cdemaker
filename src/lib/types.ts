@@ -55,13 +55,18 @@ export interface ExtractedRow {
   isAiProcessing?: boolean;        // True while AI CDE is running for this row
   
   // AI CDE Progress Tracking (for detailed status display)
-  aiCdeStatus?: "queued" | "scanning" | "complete" | "error";  // Granular AI CDE status
+  aiCdeStatus?: "queued" | "scanning" | "complete" | "error" | "page-detect";  // Granular AI CDE status
   aiCdeQueuePosition?: number;     // Position in queue (1-based, undefined = not queued)
   aiCdePagesScanned?: number;      // Pages checked so far
   aiCdeTotalPages?: number;        // Total pages to check
   aiCdeBatchesCompleted?: number;  // Batches completed
   aiCdeTotalBatches?: number;      // Total batches to process
   aiCdeError?: string;             // Error message if status is "error"
+  
+  // Phase 1: Page relevance detection (fast)
+  relevantPages?: number[];        // Pages identified as potentially containing relevant data
+  pageDetectionConfidence?: "high" | "medium" | "low";  // Confidence in page detection
+  pageDetectionSummary?: string;   // Brief description of where data might be found
   
   // Submittal reference (populated by AI CDE when submittal is provided)
   submittalValue?: string;         // Value found in submittal (best match)
