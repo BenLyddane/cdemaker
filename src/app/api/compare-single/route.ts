@@ -249,13 +249,22 @@ function determineOverallConfidence(findings: SubmittalFinding[]): "high" | "med
   return "low";
 }
 
+interface BatchInfo {
+  batchIndex: number;
+  totalBatches: number;
+  startPage: number;
+  endPage: number;
+  totalPages: number;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { specRow, submittalPages, scanAllPages = true } = body as {
+    const { specRow, submittalPages, scanAllPages = true, batchInfo } = body as {
       specRow: ExtractedRow;
       submittalPages: PageImage[];
-      scanAllPages?: boolean; // If false, only check first batch (legacy behavior)
+      scanAllPages?: boolean; // If false, process only the pages provided (client-side batching)
+      batchInfo?: BatchInfo; // Client-side batching metadata
     };
 
     if (!specRow) {
@@ -272,8 +281,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`[compare-single] Comparing: ${specRow.field} = ${specRow.value}`);
-    console.log(`[compare-single] Total submittal pages: ${submittalPages.length}, scanAllPages: ${scanAllPages}`);
+    // Log based on batching mode
+    if (batchInfo) {
+      console.log(`[compare-single] Client batch ${batchInfo.batchIndex + 1}/${batchInfo.totalBatches} for: ${specRow.field}`);
+      console.log(`[compare-single] Pages ${batchInfo.startPage}-${batchInfo.endPage} of ${batchInfo.totalPages}`);
+    } else {
+      console.log(`[compare-single] Comparing: ${specRow.field} = ${specRow.value}`);
+      console.log(`[compare-single] Total submittal pages: ${submittalPages.length}, scanAllPages: ${scanAllPages}`);
+    }
     
     // Collect all findings from all batches
     const allFindings: SubmittalFinding[] = [];

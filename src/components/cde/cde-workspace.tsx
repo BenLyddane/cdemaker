@@ -177,52 +177,119 @@ export function CDEWorkspace() {
     });
   }, []);
 
-  // Process a single row with AI CDE - now scans ALL pages in batches
+  // Process a single row with AI CDE - sends pages in batches to stay under Vercel's 4.5MB limit
   const processRowWithAiCde = useCallback(async (row: ExtractedRow, submittalPages: PageData[]) => {
+    // Vercel has a 4.5MB request body limit - send pages in smaller batches
+    const PAGES_PER_BATCH = 5; // ~5 pages × ~500KB ≈ 2.5MB (safe margin under 4.5MB)
+    
     try {
-      // Send ALL pages - the API will batch them internally in groups of 20
-      // This enables multi-pass search to find all occurrences
-      const response = await fetch("/api/compare-single", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          specRow: row,
-          submittalPages: submittalPages.map(p => ({
-            base64: p.base64,
-            mimeType: p.mimeType,
-            pageNumber: p.pageNumber,
-          })),
-          scanAllPages: true, // Enable full multi-pass search
-        }),
-      });
-
-      if (!response.ok) {
-        console.error(`AI CDE failed for row ${row.id}`);
-        // Mark as no longer processing but don't set status
-        setDocumentExtractions(prev => {
-          const newMap = new Map(prev);
-          for (const [docId, extraction] of newMap.entries()) {
-            const rowIndex = extraction.rows.findIndex(r => r.id === row.id);
-            if (rowIndex !== -1) {
-              const newRows = [...extraction.rows];
-              newRows[rowIndex] = { ...newRows[rowIndex], isAiProcessing: false };
-              newMap.set(docId, { ...extraction, rows: newRows });
-              break;
-            }
-          }
-          return newMap;
-        });
-        return;
-      }
-
-      const result = await response.json();
-      if (result.success && result.data) {
-        updateRowWithAiResult(row.id, result.data);
+      const allFindings: SubmittalFinding[] = [];
+      const totalBatches = Math.ceil(submittalPages.length / PAGES_PER_BATCH);
+      let hasError = false;
+      
+      console.log(`[AI CDE] Processing "${row.field}" across ${submittalPages.length} pages in ${totalBatches} batches`);
+      
+      // Process pages in batches
+      for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
+        const startIdx = batchIdx * PAGES_PER_BATCH;
+        const endIdx = Math.min(startIdx + PAGES_PER_BATCH, submittalPages.length);
+        const batchPages = submittalPages.slice(startIdx, endIdx);
         
-        // Log multi-finding results
-        if (result.data.totalFindings > 1) {
-          console.log(`[AI CDE] Found ${result.data.totalFindings} occurrences for "${row.field}"`);
+        try {
+          const response = await fetch("/api/compare-single", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              specRow: row,
+              submittalPages: batchPages.map(p => ({
+                base64: p.base64,
+                mimeType: p.mimeType,
+                pageNumber: p.pageNumber,
+              })),
+              scanAllPages: false, // Single batch mode - we handle batching client-side
+              batchInfo: {
+                batchIndex: batchIdx,
+                totalBatches,
+                startPage: batchPages[0]?.pageNumber || startIdx + 1,
+                endPage: batchPages[batchPages.length - 1]?.pageNumber || endIdx,
+                totalPages: submittalPages.length,
+              },
+            }),
+          });
+
+          if (!response.ok) {
+            console.error(`[AI CDE] Batch ${batchIdx + 1}/${totalBatches} failed for row ${row.id}: ${response.status}`);
+            hasError = true;
+            continue; // Try next batch even if this one fails
+          }
+
+          const result = await response.json();
+          if (result.success && result.data?.findings) {
+            allFindings.push(...result.data.findings);
+          }
+          
+          // Small delay between batches to avoid rate limiting
+          if (batchIdx < totalBatches - 1) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+        } catch (batchError) {
+          console.error(`[AI CDE] Batch ${batchIdx + 1}/${totalBatches} error:`, batchError);
+          hasError = true;
+          // Continue with next batch
         }
+      }
+      
+      // If we got any findings, update the row with aggregated results
+      if (allFindings.length > 0) {
+        // Sort findings by confidence then status
+        const confidenceOrder = { high: 0, medium: 1, low: 2 };
+        const statusOrder = { comply: 0, deviate: 1, exception: 2, pending: 3 };
+        
+        allFindings.sort((a, b) => {
+          const confDiff = confidenceOrder[a.confidence] - confidenceOrder[b.confidence];
+          if (confDiff !== 0) return confDiff;
+          return statusOrder[a.status] - statusOrder[b.status];
+        });
+        
+        const bestMatch = allFindings[0];
+        
+        // Determine overall status
+        let overallStatus: CDEStatus = "exception";
+        if (allFindings.some(f => f.status === "comply")) overallStatus = "comply";
+        else if (allFindings.some(f => f.status === "deviate")) overallStatus = "deviate";
+        
+        // Determine overall confidence
+        let matchConfidence: "high" | "medium" | "low" | "not_found" = "not_found";
+        if (allFindings.some(f => f.confidence === "high")) matchConfidence = "high";
+        else if (allFindings.some(f => f.confidence === "medium")) matchConfidence = "medium";
+        else if (allFindings.length > 0) matchConfidence = "low";
+        
+        updateRowWithAiResult(row.id, {
+          status: overallStatus,
+          matchConfidence,
+          explanation: allFindings.length > 1 
+            ? `${allFindings.length} occurrences found. Best: ${bestMatch.explanation}`
+            : bestMatch.explanation,
+          submittalValue: bestMatch.value,
+          submittalUnit: bestMatch.unit,
+          submittalLocation: {
+            pageNumber: bestMatch.pageNumber,
+            boundingBox: bestMatch.boundingBox,
+          },
+          findings: allFindings,
+          totalFindings: allFindings.length,
+        });
+        
+        console.log(`[AI CDE] Found ${allFindings.length} total findings for "${row.field}"`);
+      } else {
+        // No findings - mark as exception with not_found
+        updateRowWithAiResult(row.id, {
+          status: "exception",
+          matchConfidence: "not_found",
+          explanation: hasError ? "Search failed - please retry" : "No matching data found in submittal",
+          findings: [],
+          totalFindings: 0,
+        });
       }
     } catch (error) {
       console.error(`AI CDE error for row ${row.id}:`, error);
