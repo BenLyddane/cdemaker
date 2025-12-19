@@ -797,34 +797,38 @@ export function CDEWorkspace() {
         itemCount: pages.length,
       });
       
-      // If there are already extracted rows, queue them for AI CDE
-      // This handles the case where user uploads submittal while spec is being extracted
-      // Note: We access documentExtractions via a ref-like pattern to avoid stale closure
-      // Calculate rows to queue BEFORE any setState, then queue after
-      const rowsToQueue: { rows: ExtractedRow[]; docId: string }[] = [];
-      
-      // Use a callback to get the current state and calculate what needs queuing
-      setDocumentExtractions(prev => {
-        for (const [docId, extraction] of prev.entries()) {
-          // Only queue rows that don't have AI CDE results yet
-          const unprocessedRows = extraction.rows.filter(r => !r.cdeStatus && !r.isAiProcessing);
-          if (unprocessedRows.length > 0) {
-            rowsToQueue.push({ rows: unprocessedRows, docId });
+      // Queue existing rows for AI CDE processing
+      // Use setTimeout(0) to ensure this runs AFTER the current React batch completes
+      // This ensures documentExtractions state is up-to-date when we read it
+      setTimeout(() => {
+        // Now read documentExtractions directly - we're in a fresh call stack
+        // so we need to use a ref or read from state
+        setDocumentExtractions(currentExtractions => {
+          const rowsToQueue: { rows: ExtractedRow[]; docId: string }[] = [];
+          
+          for (const [docId, extraction] of currentExtractions.entries()) {
+            // Only queue rows that don't have AI CDE results yet
+            const unprocessedRows = extraction.rows.filter(r => !r.cdeStatus && !r.isAiProcessing);
+            if (unprocessedRows.length > 0) {
+              console.log(`[Submittal] Found ${unprocessedRows.length} unprocessed rows in doc ${docId}`);
+              rowsToQueue.push({ rows: [...unprocessedRows], docId });
+            }
           }
-        }
-        return prev; // Return unchanged - we're just reading
-      });
-      
-      // Queue rows after state is read (using setTimeout to ensure state update completes)
-      // This is needed because we need the rows data from the state read above
-      if (rowsToQueue.length > 0) {
-        // Use queueMicrotask for cleaner async handling than setTimeout
-        queueMicrotask(() => {
-          for (const { rows, docId } of rowsToQueue) {
-            queueRowsForAiCde(rows, docId);
+          
+          // Queue the rows (do this inside to avoid closure issues)
+          if (rowsToQueue.length > 0) {
+            console.log(`[Submittal] Queuing ${rowsToQueue.reduce((sum, r) => sum + r.rows.length, 0)} rows for AI CDE`);
+            // Use another setTimeout to ensure we're outside the setState callback
+            setTimeout(() => {
+              for (const { rows, docId } of rowsToQueue) {
+                queueRowsForAiCde(rows, docId);
+              }
+            }, 0);
           }
+          
+          return currentExtractions; // Return unchanged
         });
-      }
+      }, 0);
       
     } catch (error) {
       console.error("Submittal processing error:", error);
@@ -1147,43 +1151,56 @@ export function CDEWorkspace() {
     });
   }, []);
   
-  // Create CDE (run comparison)
+  // Create CDE (run comparison) - uses smart batching to queue all unprocessed rows
   const handleCreateCDE = useCallback(async () => {
-    if (!submittalDocument) return;
-    
-    const submittalPages = documentPages.get(submittalDocument.id);
-    if (!submittalPages) return;
-    
-    setIsComparing(true);
-    setWorkflowPhase("comparing");
-    
-    try {
-      const response = await fetch("/api/compare", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          specificationData: { rows: allExtractedRows },
-          submittalPages: submittalPages.map(p => ({
-            base64: p.base64,
-            mimeType: p.mimeType,
-            pageNumber: p.pageNumber,
-          })),
-        }),
+    if (!submittalDocument) {
+      toast.error("No submittal uploaded", {
+        description: "Please upload a submittal document first.",
       });
-      
-      if (!response.ok) throw new Error("Comparison failed");
-      
-      const result = await response.json();
-      setComparisons(result.data.comparisons);
-      setSummary(result.data.summary);
-      setWorkflowPhase("complete");
-    } catch (error) {
-      console.error("Comparison error:", error);
-      setWorkflowPhase("reviewing");
+      return;
     }
     
-    setIsComparing(false);
-  }, [submittalDocument, documentPages, allExtractedRows]);
+    if (!submittalPagesRef.current || submittalPagesRef.current.length === 0) {
+      toast.error("Submittal not ready", {
+        description: "Please wait for the submittal to finish processing.",
+      });
+      return;
+    }
+    
+    // Find all rows that need AI CDE processing (no status yet and not already processing)
+    const rowsToProcess: { rows: ExtractedRow[]; docId: string }[] = [];
+    
+    for (const doc of specDocuments) {
+      const extraction = documentExtractions.get(doc.id);
+      if (extraction) {
+        const unprocessedRows = extraction.rows.filter(r => !r.cdeStatus && !r.isAiProcessing);
+        if (unprocessedRows.length > 0) {
+          rowsToProcess.push({ rows: unprocessedRows, docId: doc.id });
+        }
+      }
+    }
+    
+    if (rowsToProcess.length === 0) {
+      toast.info("All rows processed", {
+        description: "All specification items have already been analyzed.",
+      });
+      return;
+    }
+    
+    const totalRows = rowsToProcess.reduce((sum, r) => sum + r.rows.length, 0);
+    
+    toast.info("Starting AI CDE Analysis", {
+      description: `Queuing ${totalRows} items for analysis using smart batching.`,
+    });
+    
+    // Queue all rows for processing using the smart batching system
+    for (const { rows, docId } of rowsToProcess) {
+      queueRowsForAiCde(rows, docId);
+    }
+    
+    // Note: We stay in "reviewing" phase since rows are updated in-place
+    // The UI will show progress via the row-level status updates
+  }, [submittalDocument, specDocuments, documentExtractions, queueRowsForAiCde]);
   
   // Check if can create CDE
   const canCreateCDE = useMemo(() => {
