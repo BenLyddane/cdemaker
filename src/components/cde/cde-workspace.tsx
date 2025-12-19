@@ -276,7 +276,7 @@ export function CDEWorkspace() {
     processAiCdeQueue();
   }, [processAiCdeQueue]);
 
-  // Process a spec/schedule document with streaming
+  // Process a spec/schedule document with page-by-page extraction
   const processSpecDocument = useCallback(async (doc: UploadedDocument) => {
     const abortController = new AbortController();
     extractionAbortRef.current = abortController;
@@ -300,7 +300,7 @@ export function CDEWorkspace() {
       
       addLog(`PDF converted: ${pages.length} pages`, "success");
       
-      // First, detect document type (non-streaming)
+      // First, detect document type (with just the first page - small payload)
       addLog("Detecting document type...", "info");
       const detectResponse = await fetch("/api/extract", {
         method: "POST",
@@ -364,105 +364,122 @@ export function CDEWorkspace() {
         setViewingDocId(doc.id);
       }
       
-      // Start streaming extraction
-      addLog(`Starting extraction of ${pages.length} pages...`, "info");
+      // Process pages one at a time to avoid payload size limits
+      addLog(`Starting page-by-page extraction of ${pages.length} pages...`, "info");
       setExtractionProgress(prev => prev ? { ...prev, totalPages: pages.length } : prev);
       
-      const response = await fetch("/api/extract", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pages: pages.map(p => ({
-            base64: p.base64,
-            mimeType: p.mimeType,
-            pageNumber: p.pageNumber,
-          })),
-          documentType: detectedType,
-          stream: true,
-        }),
-        signal: abortController.signal,
-      });
+      let totalExtractedRows = 0;
+      let successfulPages = 0;
+      let failedPages = 0;
       
-      if (!response.ok) throw new Error("Extraction failed");
-      
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No response body");
-      
-      const decoder = new TextDecoder();
-      let buffer = "";
-      
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      for (let i = 0; i < pages.length; i++) {
+        // Check if aborted
+        if (abortController.signal.aborted) {
+          addLog("Extraction cancelled by user", "warning");
+          break;
+        }
         
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n\n");
-        buffer = lines.pop() || "";
+        const page = pages[i];
+        const pageNum = i + 1;
         
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const event: StreamEvent = JSON.parse(line.slice(6));
-              
-              switch (event.type) {
-                case "log":
-                  addLog(event.message, event.level);
-                  break;
-                  
-                case "page_start":
-                  setExtractionProgress(prev => prev ? { 
-                    ...prev, 
-                    currentPage: event.pageNumber,
-                    totalPages: event.totalPages,
-                  } : prev);
-                  break;
-                  
-                case "page_complete":
-                  if (event.rows && event.rows.length > 0) {
-                    // Incrementally add rows
-                    setDocumentExtractions(prev => {
-                      const current = prev.get(doc.id);
-                      if (!current) return prev;
-                      const newMap = new Map(prev);
-                      newMap.set(doc.id, {
-                        ...current,
-                        rows: [...current.rows, ...event.rows],
-                        metadata: { ...current.metadata, totalRows: current.rows.length + event.rows.length },
-                      });
-                      return newMap;
-                    });
-                    
-                    // Update item count
-                    setSpecDocuments(prev => prev.map(d => 
-                      d.id === doc.id ? { ...d, itemCount: (d.itemCount || 0) + event.rows.length } : d
-                    ));
-                    
-                    // Queue rows for AI CDE if submittal is available
-                    if (submittalPagesRef.current && submittalPagesRef.current.length > 0) {
-                      addLog(`Queuing ${event.rows.length} items for AI CDE...`, "info");
-                      queueRowsForAiCde(event.rows, doc.id);
-                    }
-                  }
-                  break;
-                  
-                case "complete":
-                  addLog(`Extraction complete! ${event.totalRows} requirements found.`, "success");
-                  setSpecDocuments(prev => prev.map(d => {
-                    if (d.id !== doc.id) return d;
-                    return {
-                      ...d,
-                      status: "complete" as const,
-                      itemCount: event.totalRows,
-                    };
-                  }));
-                  break;
-              }
-            } catch (e) {
-              console.error("Failed to parse SSE event:", e, line);
-            }
+        // Update progress
+        setExtractionProgress(prev => prev ? { 
+          ...prev, 
+          currentPage: pageNum,
+        } : prev);
+        
+        addLog(`Processing page ${pageNum} of ${pages.length}...`, "info");
+        
+        try {
+          // Send single page to the new endpoint
+          const response = await fetch("/api/extract-page", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              page: {
+                base64: page.base64,
+                mimeType: page.mimeType,
+                pageNumber: page.pageNumber,
+              },
+              documentType: detectedType,
+              totalPages: pages.length,
+            }),
+            signal: abortController.signal,
+          });
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Page ${pageNum} extraction failed: ${errorText}`);
           }
+          
+          const result = await response.json();
+          
+          if (result.success && result.data) {
+            const { rows, rowCount, pageContent } = result.data;
+            
+            if (rows && rows.length > 0) {
+              // Incrementally add rows
+              setDocumentExtractions(prev => {
+                const current = prev.get(doc.id);
+                if (!current) return prev;
+                const newMap = new Map(prev);
+                newMap.set(doc.id, {
+                  ...current,
+                  rows: [...current.rows, ...rows],
+                  metadata: { ...current.metadata, totalRows: current.rows.length + rows.length },
+                });
+                return newMap;
+              });
+              
+              totalExtractedRows += rowCount;
+              
+              // Update item count
+              setSpecDocuments(prev => prev.map(d => 
+                d.id === doc.id ? { ...d, itemCount: (d.itemCount || 0) + rowCount } : d
+              ));
+              
+              addLog(`Page ${pageNum}: Extracted ${rowCount} requirements`, "success");
+              
+              // Queue rows for AI CDE if submittal is available
+              if (submittalPagesRef.current && submittalPagesRef.current.length > 0) {
+                addLog(`Queuing ${rowCount} items for AI CDE...`, "info");
+                queueRowsForAiCde(rows, doc.id);
+              }
+            } else {
+              addLog(`Page ${pageNum}: No extractable requirements found`, "info");
+            }
+            
+            successfulPages++;
+          } else {
+            addLog(`Page ${pageNum}: Extraction returned no data`, "warning");
+            failedPages++;
+          }
+        } catch (pageError) {
+          if ((pageError as Error).name === "AbortError") {
+            throw pageError; // Re-throw abort errors
+          }
+          console.error(`Page ${pageNum} error:`, pageError);
+          addLog(`Page ${pageNum} failed: ${pageError instanceof Error ? pageError.message : "Unknown error"}`, "error");
+          failedPages++;
+          // Continue with next page instead of failing entire extraction
+        }
+        
+        // Small delay between pages to avoid rate limiting
+        if (i < pages.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100));
         }
       }
+      
+      // Extraction complete
+      addLog(`Extraction complete! ${totalExtractedRows} requirements found from ${successfulPages} pages (${failedPages} failed)`, "success");
+      setSpecDocuments(prev => prev.map(d => {
+        if (d.id !== doc.id) return d;
+        return {
+          ...d,
+          status: "complete" as const,
+          itemCount: totalExtractedRows,
+        };
+      }));
       
       setWorkflowPhase("reviewing");
       setExtractionProgress(null);
@@ -481,7 +498,7 @@ export function CDEWorkspace() {
     } finally {
       extractionAbortRef.current = null;
     }
-  }, [viewingDocId, addLog]);
+  }, [viewingDocId, addLog, queueRowsForAiCde]);
   
   // Process a submittal document (no extraction, just store for visual comparison)
   const processSubmittalDocument = useCallback(async (doc: UploadedDocument) => {
