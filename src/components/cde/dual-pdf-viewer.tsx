@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { 
   ChevronLeft, 
@@ -59,43 +59,12 @@ function SinglePdfPanel({
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
-  const [boxPosition, setBoxPosition] = useState<{
-    left: number;
-    top: number;
-    width: number;
-    height: number;
-  } | null>(null);
 
   const currentPageData = pages.find(p => p.pageNumber === currentPage);
 
-  // Calculate bounding box position based on displayed image size
-  const updateBoundingBox = useCallback(() => {
-    if (!boundingBox || !imageRef.current) {
-      setBoxPosition(null);
-      return;
-    }
-
-    const img = imageRef.current;
-    const displayedWidth = img.clientWidth;
-    const displayedHeight = img.clientHeight;
-
-    if (!displayedWidth || !displayedHeight) {
-      setBoxPosition(null);
-      return;
-    }
-
-    setBoxPosition({
-      left: boundingBox.x * displayedWidth,
-      top: boundingBox.y * displayedHeight,
-      width: boundingBox.width * displayedWidth,
-      height: boundingBox.height * displayedHeight,
-    });
-  }, [boundingBox]);
-
-  // Update bounding box when zoom changes or image loads
-  useEffect(() => {
-    updateBoundingBox();
-  }, [updateBoundingBox, zoom, imageDimensions]);
+  // Calculate scaled image dimensions based on zoom
+  const scaledWidth = imageDimensions ? (imageDimensions.width * zoom) / 100 : undefined;
+  const scaledHeight = imageDimensions ? (imageDimensions.height * zoom) / 100 : undefined;
 
   // Handle image load to get natural dimensions
   const handleImageLoad = useCallback(() => {
@@ -104,12 +73,8 @@ function SinglePdfPanel({
         width: imageRef.current.naturalWidth,
         height: imageRef.current.naturalHeight,
       });
-      // Update bounding box after a small delay to ensure image is rendered
-      requestAnimationFrame(() => {
-        updateBoundingBox();
-      });
     }
-  }, [updateBoundingBox]);
+  }, []);
 
   // Scroll to bounding box when it changes
   useEffect(() => {
@@ -137,10 +102,6 @@ function SinglePdfPanel({
       });
     }
   }, [boundingBox, zoom, imageDimensions]);
-
-  // Calculate scaled image dimensions based on zoom
-  const scaledWidth = imageDimensions ? (imageDimensions.width * zoom) / 100 : undefined;
-  const scaledHeight = imageDimensions ? (imageDimensions.height * zoom) / 100 : undefined;
 
   if (isEmpty) {
     return (
