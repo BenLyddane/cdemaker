@@ -49,9 +49,54 @@ EXTRACTION RULES:
 1. Extract COMPLETE requirements - each row should be something reviewable
 2. CONSOLIDATE related specs (electrical together, dimensions together, etc.)
 3. Include the FULL requirement text, not just values
-4. Look for the specification section number (e.g., "23 34 00", "01 33 00") on the page header/footer
+4. **CRITICAL - FULL SPECIFICATION NUMBER EXTRACTION:**
+   
+   ⚠️ IMPORTANT: You MUST ALWAYS include the FULL specification reference path, not just the section number!
+   
+   FORMAT: "[Section #] [Article].[Paragraph].[Subparagraph].[Item]"
+   
+   EXAMPLES - CORRECT vs WRONG:
+   ❌ WRONG: "23 70 00" (missing subsection - NEVER do this!)
+   ✅ CORRECT: "23 70 00 1.4.B" (with full path)
+   ✅ CORRECT: "23 70 00 1.4.B.1" (with item number)
+   ✅ CORRECT: "23 70 00 2.1.A.2.a" (deeply nested)
+   
+   MORE CORRECT EXAMPLES:
+   - "23 70 00 1.4.B" for Shop Drawings requirement in Part 1, Article 1.4, Paragraph B
+   - "23 70 00 1.4.B.1" for the first item under Shop Drawings
+   - "23 70 00 2.2.A" for equipment in Part 2, Article 2.2, Paragraph A
+   - "01 33 00 1.2.C.3" for submittal item
+   
+   HOW TO BUILD THE FULL SPEC NUMBER:
+   1. Start with 6-digit section number from header (e.g., "23 70 00")
+   2. Find the PART number (PART 1 = 1, PART 2 = 2, PART 3 = 3)
+   3. Find the Article number (1.1, 1.2, 1.3, 1.4, 2.1, 2.2, etc.)
+   4. Find the Paragraph letter (A, B, C, D, E, F...)
+   5. Add item numbers if present (1, 2, 3...)
+   6. Add sub-letters if present (a, b, c...)
+   
+   EXAMPLE - Looking at this document structure:
+   
+   SECTION 23 70 00 - AIR HANDLING
+   PART 1 - GENERAL
+     1.4 SUBMITTALS
+       A. Prepare submissions...
+       B. Shop Drawings
+         1. Air Handling Equipment...
+         2. Fans...
+   
+   For "Shop Drawings" → specNumber: "23 70 00 1.4.B"
+   For "Air Handling Equipment" item → specNumber: "23 70 00 1.4.B.1"
+   For "Fans" item → specNumber: "23 70 00 1.4.B.2"
+   
+   ⚠️ NEVER RETURN JUST THE SECTION NUMBER! Always include the full path like 1.4.B or 2.1.A!
+
 5. Include warranty requirements, notes, submittal requirements, performance specs, etc.
-6. For tables/schedules, each equipment row is one item with all its specs combined
+6. For SCHEDULES/TABLES:
+   - Extract each row of the schedule as a separate item
+   - Include the TABLE/SCHEDULE TITLE as the section name
+   - Include ALL column headers in a meaningful way for the field name
+   - The specNumber should reference the schedule location, e.g., "23 84 15 SCHEDULE A Row 1"
 
 BOUNDING BOX INSTRUCTIONS:
 For each extracted item, provide the bounding box coordinates as NORMALIZED values (0.0 to 1.0):
@@ -66,7 +111,7 @@ OUTPUT FORMAT (strict JSON):
 {
   "pageContent": {
     "hasData": true/false,
-    "specNumber": "XX XX XX or null if not visible",
+    "specNumber": "XX XX XX (main section number from header/footer)",
     "specTitle": "Section title if visible"
   },
   "rows": [
@@ -75,7 +120,7 @@ OUTPUT FORMAT (strict JSON):
       "value": "Complete requirement text including all relevant details",
       "unit": "unit if applicable, null otherwise",
       "section": "Category (Electrical, Mechanical, Submittal, Warranty, Performance, etc.)",
-      "specNumber": "XX XX XX (from page header) or null",
+      "specNumber": "FULL PATH e.g. '23 34 00 2.1.A' or '01 33 00 1.2.B.3' - NEVER just section number!",
       "confidence": "high" | "medium" | "low",
       "boundingBox": {
         "x": 0.0-1.0,
@@ -97,7 +142,8 @@ IMPORTANT:
 - If a page has no extractable requirements (blank, cover page, TOC with no specs), return {"pageContent": {"hasData": false}, "rows": []}
 - DO NOT extract page headers/footers as requirements unless they contain spec data
 - Prefer FEWER, MORE COMPLETE items over MANY FRAGMENTED items
-- Each row should answer: "What requirement does the submittal need to meet?"`;
+- Each row should answer: "What requirement does the submittal need to meet?"
+- REMEMBER: specNumber must ALWAYS include the full path (e.g., "23 70 00 1.4.B"), not just the section number!`;
 }
 
 async function extractPageWithRetry(
