@@ -417,31 +417,176 @@ export function CDEWorkspace() {
     }
   }, [updateRowWithAiResult, updateRowProgress]);
 
-  // Process the AI CDE queue
+  // Process a batch of rows against submittal pages using the batch endpoint
+  const processBatchWithAiCde = useCallback(async (rows: ExtractedRow[], submittalPages: PageData[]) => {
+    const batches = submittalBatchesRef.current || createOptimalBatches(submittalPages);
+    const totalBatches = batches.length;
+    const totalPages = submittalPages.length;
+    
+    // Update all rows in this batch to scanning status
+    for (const row of rows) {
+      updateRowProgress(row.id, {
+        aiCdeStatus: "scanning",
+        aiCdeTotalPages: totalPages,
+        aiCdeTotalBatches: totalBatches,
+        aiCdePagesScanned: 0,
+        aiCdeBatchesCompleted: 0,
+      });
+    }
+    
+    console.log(`[AI CDE Batch] Processing ${rows.length} specs across ${totalPages} pages in ${totalBatches} batches`);
+    
+    // Collect findings for each row across all page batches
+    const rowFindings = new Map<string, SubmittalFinding[]>();
+    rows.forEach(r => rowFindings.set(r.id, []));
+    let hasError = false;
+    let pagesScanned = 0;
+    
+    // Process each page batch
+    for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
+      const batchPages = batches[batchIdx];
+      const startPage = batchPages[0]?.pageNumber || 1;
+      const endPage = batchPages[batchPages.length - 1]?.pageNumber || batchPages.length;
+      
+      // Update progress for all rows in this batch
+      for (const row of rows) {
+        updateRowProgress(row.id, {
+          aiCdePagesScanned: pagesScanned,
+          aiCdeBatchesCompleted: batchIdx,
+        });
+      }
+      
+      try {
+        const response = await fetch("/api/compare-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            specRows: rows,
+            submittalPages: batchPages.map(p => ({
+              base64: p.base64,
+              mimeType: p.mimeType,
+              pageNumber: p.pageNumber,
+            })),
+            batchInfo: {
+              batchIndex: batchIdx,
+              totalBatches,
+              startPage,
+              endPage,
+              totalPages,
+            },
+          }),
+        });
+
+        if (!response.ok) {
+          console.error(`[AI CDE Batch] Page batch ${batchIdx + 1}/${totalBatches} failed: ${response.status}`);
+          hasError = true;
+        } else {
+          const result = await response.json();
+          if (result.success && result.data?.results) {
+            // Aggregate findings for each row
+            for (const rowResult of result.data.results) {
+              const existing = rowFindings.get(rowResult.rowId) || [];
+              rowFindings.set(rowResult.rowId, [...existing, ...rowResult.findings]);
+            }
+          }
+        }
+        
+        pagesScanned += batchPages.length;
+        
+        // Small delay between batches
+        if (batchIdx < totalBatches - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      } catch (error) {
+        console.error(`[AI CDE Batch] Error:`, error);
+        hasError = true;
+        pagesScanned += batchPages.length;
+      }
+    }
+    
+    // Final progress update and results for all rows
+    for (const row of rows) {
+      const findings = rowFindings.get(row.id) || [];
+      
+      updateRowProgress(row.id, {
+        aiCdePagesScanned: totalPages,
+        aiCdeBatchesCompleted: totalBatches,
+      });
+      
+      if (findings.length > 0) {
+        // Sort and pick best
+        const confidenceOrder = { high: 0, medium: 1, low: 2 };
+        const statusOrder: Record<CDEStatus, number> = { comply: 0, deviate: 1, exception: 2, not_found: 3, pending: 4 };
+        findings.sort((a, b) => {
+          const confDiff = confidenceOrder[a.confidence] - confidenceOrder[b.confidence];
+          if (confDiff !== 0) return confDiff;
+          return statusOrder[a.status] - statusOrder[b.status];
+        });
+        
+        const bestMatch = findings[0];
+        let overallStatus: CDEStatus = "exception";
+        if (findings.some(f => f.status === "comply")) overallStatus = "comply";
+        else if (findings.some(f => f.status === "deviate")) overallStatus = "deviate";
+        
+        let matchConfidence: "high" | "medium" | "low" | "not_found" = "not_found";
+        if (findings.some(f => f.confidence === "high")) matchConfidence = "high";
+        else if (findings.some(f => f.confidence === "medium")) matchConfidence = "medium";
+        else if (findings.length > 0) matchConfidence = "low";
+        
+        updateRowWithAiResult(row.id, {
+          status: overallStatus,
+          matchConfidence,
+          explanation: findings.length > 1 
+            ? `${findings.length} found. Best: ${bestMatch.explanation}`
+            : bestMatch.explanation,
+          submittalValue: bestMatch.value,
+          submittalUnit: bestMatch.unit,
+          submittalLocation: {
+            pageNumber: bestMatch.pageNumber,
+            boundingBox: bestMatch.boundingBox,
+          },
+          findings,
+          totalFindings: findings.length,
+        });
+      } else {
+        updateRowWithAiResult(row.id, {
+          status: "not_found",
+          matchConfidence: "not_found",
+          explanation: hasError ? "Search failed - please retry" : "No matching data found",
+          findings: [],
+          totalFindings: 0,
+        });
+      }
+    }
+    
+    console.log(`[AI CDE Batch] Completed ${rows.length} specs`);
+  }, [updateRowWithAiResult, updateRowProgress]);
+
+  // Process the AI CDE queue - processes rows in batches for 5x speedup
   const processAiCdeQueue = useCallback(async () => {
     if (aiCdeProcessingRef.current) return;
     if (aiCdeQueueRef.current.length === 0) return;
     if (!submittalPagesRef.current) return;
 
     aiCdeProcessingRef.current = true;
-    aiCdePausedRef.current = false; // Reset pause flag when starting
+    aiCdePausedRef.current = false;
     const submittalPages = submittalPagesRef.current;
 
     while (aiCdeQueueRef.current.length > 0 && !aiCdePausedRef.current) {
-      const row = aiCdeQueueRef.current.shift();
-      if (row) {
-        await processRowWithAiCde(row, submittalPages);
-        // Small delay between requests to avoid rate limiting
+      // Take ROWS_PER_BATCH rows at a time
+      const rowBatch = aiCdeQueueRef.current.splice(0, ROWS_PER_BATCH);
+      if (rowBatch.length > 0) {
+        await processBatchWithAiCde(rowBatch, submittalPages);
+        // Small delay between row batches
         await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
 
-    // If paused, clear remaining queue and mark rows as not processing
+    // If paused, clear remaining queue
     if (aiCdePausedRef.current && aiCdeQueueRef.current.length > 0) {
       const remainingRowIds = aiCdeQueueRef.current.map(r => r.id);
-      aiCdeQueueRef.current = []; // Clear the queue
+      aiCdeQueueRef.current = [];
       
-      // Mark remaining rows as no longer processing
       setDocumentExtractions(prev => {
         const newMap = new Map(prev);
         for (const [docId, extraction] of newMap.entries()) {
@@ -458,7 +603,7 @@ export function CDEWorkspace() {
     }
 
     aiCdeProcessingRef.current = false;
-  }, [processRowWithAiCde]);
+  }, [processBatchWithAiCde]);
 
   // Queue rows for AI CDE processing
   const queueRowsForAiCde = useCallback((rows: ExtractedRow[], docId: string) => {
