@@ -3,8 +3,8 @@ import { GoogleGenerativeAI, Part } from "@google/generative-ai";
 import type { ExtractedRow, CDEStatus, SubmittalFinding, BoundingBox } from "@/lib/types";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY || "");
-// Using flash for speed - processes multiple rows in one call
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+// Using gemini-3-flash-preview for speed ($0.50/$3) - processes multiple rows in one call
+const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
 
 // Configuration
 const MAX_RETRIES = 3;

@@ -3,8 +3,8 @@ import { GoogleGenerativeAI, Part } from "@google/generative-ai";
 import type { ExtractedRow, CDEStatus, DocumentLocation, SubmittalFinding, BoundingBox } from "@/lib/types";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY || "");
-// Using flash for speed - pro is 5-10x slower
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+// Using gemini-3-flash-preview for speed ($0.50/$3) vs pro ($2/$12)
+const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
 
 // Configuration
 const MAX_RETRIES = 3;
