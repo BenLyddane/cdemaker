@@ -178,10 +178,10 @@ export function CDEWorkspace() {
     });
   }, []);
 
-  // Process a single row with AI CDE - sends pages in batches to stay under Vercel's 4.5MB limit
+  // Process a single row with AI CDE - sends pages one at a time to stay under Vercel's 4.5MB limit
   const processRowWithAiCde = useCallback(async (row: ExtractedRow, submittalPages: PageData[]) => {
-    // Vercel has a 4.5MB request body limit - send pages in smaller batches
-    const PAGES_PER_BATCH = 5; // ~5 pages × ~500KB ≈ 2.5MB (safe margin under 4.5MB)
+    // Vercel has a 4.5MB request body limit - send pages one at a time to guarantee staying under limit
+    const PAGES_PER_BATCH = 1; // Single page per request to avoid 413 errors
     
     try {
       const allFindings: SubmittalFinding[] = [];

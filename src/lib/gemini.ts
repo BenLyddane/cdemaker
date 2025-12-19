@@ -14,8 +14,8 @@ export type ExtractedData = ExtractionResult;
 // Initialize the Gemini API client
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY || "");
 
-// Use Gemini 2.0 Flash for extraction
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+// Use Gemini 3 Pro Preview for accurate bounding box extraction
+const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
 
 // Configuration
 const MAX_CONCURRENT_REQUESTS = 5;
