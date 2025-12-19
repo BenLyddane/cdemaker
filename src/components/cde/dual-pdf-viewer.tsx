@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { 
   ChevronLeft, 
@@ -11,7 +11,8 @@ import {
   FileText,
   Package,
   Columns,
-  Square
+  Square,
+  Maximize2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { PageData } from "@/lib/pdf-utils";
@@ -55,7 +56,9 @@ function SinglePdfPanel({
   isEmpty,
   emptyMessage,
 }: SinglePdfPanelProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
   const [boxPosition, setBoxPosition] = useState<{
     left: number;
     top: number;
@@ -65,9 +68,9 @@ function SinglePdfPanel({
 
   const currentPageData = pages.find(p => p.pageNumber === currentPage);
 
-  // Update bounding box position when image loads or zoom changes
-  useEffect(() => {
-    if (!boundingBox || !imageRef.current || !currentPageData) {
+  // Calculate bounding box position based on displayed image size
+  const updateBoundingBox = useCallback(() => {
+    if (!boundingBox || !imageRef.current) {
       setBoxPosition(null);
       return;
     }
@@ -87,7 +90,48 @@ function SinglePdfPanel({
       width: boundingBox.width * displayedWidth,
       height: boundingBox.height * displayedHeight,
     });
-  }, [boundingBox, currentPageData, zoom]);
+  }, [boundingBox]);
+
+  // Update bounding box when zoom changes or image loads
+  useEffect(() => {
+    updateBoundingBox();
+  }, [updateBoundingBox, zoom, imageDimensions]);
+
+  // Handle image load to get natural dimensions
+  const handleImageLoad = useCallback(() => {
+    if (imageRef.current) {
+      setImageDimensions({
+        width: imageRef.current.naturalWidth,
+        height: imageRef.current.naturalHeight,
+      });
+      // Update bounding box after a small delay to ensure image is rendered
+      requestAnimationFrame(() => {
+        updateBoundingBox();
+      });
+    }
+  }, [updateBoundingBox]);
+
+  // Scroll to bounding box when it changes
+  useEffect(() => {
+    if (boxPosition && containerRef.current && imageRef.current) {
+      const container = containerRef.current;
+      const zoomFactor = zoom / 100;
+      
+      // Calculate the position to scroll to (center the bounding box in view)
+      const scrollLeft = (boxPosition.left * zoomFactor) - (container.clientWidth / 2) + ((boxPosition.width * zoomFactor) / 2);
+      const scrollTop = (boxPosition.top * zoomFactor) - (container.clientHeight / 2) + ((boxPosition.height * zoomFactor) / 2);
+      
+      container.scrollTo({
+        left: Math.max(0, scrollLeft),
+        top: Math.max(0, scrollTop),
+        behavior: 'smooth',
+      });
+    }
+  }, [boxPosition, zoom]);
+
+  // Calculate scaled image dimensions based on zoom
+  const scaledWidth = imageDimensions ? (imageDimensions.width * zoom) / 100 : undefined;
+  const scaledHeight = imageDimensions ? (imageDimensions.height * zoom) / 100 : undefined;
 
   if (isEmpty) {
     return (
@@ -117,9 +161,9 @@ function SinglePdfPanel({
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-neutral-100 border-r border-neutral-200 last:border-r-0 min-w-0">
+    <div className="flex-1 flex flex-col bg-neutral-100 border-r border-neutral-200 last:border-r-0 min-w-0 overflow-hidden">
       {/* Header */}
-      <div className={cn("px-3 py-2 border-b flex items-center justify-between", bgColor)}>
+      <div className={cn("px-3 py-2 border-b flex items-center justify-between shrink-0", bgColor)}>
         <span className={cn("text-detail font-semibold", titleColor)}>{title}</span>
         
         {/* Page navigation */}
@@ -148,61 +192,68 @@ function SinglePdfPanel({
         </div>
       </div>
       
-      {/* PDF Content */}
-      <div className="flex-1 overflow-auto p-2">
+      {/* PDF Content - Scrollable container */}
+      <div 
+        ref={containerRef}
+        className="flex-1 overflow-auto"
+        style={{
+          // Ensure scrollbars are visible and functional
+          overscrollBehavior: 'contain',
+        }}
+      >
+        {/* Inner wrapper for centering when content is smaller than viewport */}
         <div 
-          className="flex items-center justify-center min-h-full"
+          className="inline-block p-4"
           style={{
-            transform: `scale(${zoom / 100})`,
-            transformOrigin: 'center center',
+            minWidth: '100%',
+            minHeight: '100%',
           }}
         >
           {currentPageData && (
-            <div className="relative shadow-lg">
+            <div 
+              className="relative shadow-lg mx-auto"
+              style={{
+                width: scaledWidth ? `${scaledWidth}px` : 'auto',
+                height: scaledHeight ? `${scaledHeight}px` : 'auto',
+              }}
+            >
               <img
                 ref={imageRef}
                 src={`data:${currentPageData.mimeType};base64,${currentPageData.base64}`}
                 alt={`Page ${currentPage}`}
-                className="max-w-full h-auto bg-white"
-                style={{ transform: `rotate(${rotation}deg)` }}
-                onLoad={() => {
-                  if (boundingBox && imageRef.current) {
-                    const img = imageRef.current;
-                    const displayedWidth = img.clientWidth;
-                    const displayedHeight = img.clientHeight;
-                    
-                    if (displayedWidth && displayedHeight) {
-                      setBoxPosition({
-                        left: boundingBox.x * displayedWidth,
-                        top: boundingBox.y * displayedHeight,
-                        width: boundingBox.width * displayedWidth,
-                        height: boundingBox.height * displayedHeight,
-                      });
-                    }
-                  }
+                className="bg-white block"
+                style={{ 
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                  transform: rotation ? `rotate(${rotation}deg)` : undefined,
+                  transformOrigin: 'center center',
                 }}
+                onLoad={handleImageLoad}
               />
               
-              {/* Bounding Box Overlay */}
+              {/* Bounding Box Overlay - scales with the image */}
               {boxPosition && (
                 <div
                   className={cn(
-                    "absolute pointer-events-none border-3 rounded-sm animate-pulse",
+                    "absolute pointer-events-none rounded-sm animate-pulse",
                     borderColor
                   )}
                   style={{
-                    left: boxPosition.left,
-                    top: boxPosition.top,
-                    width: boxPosition.width,
-                    height: boxPosition.height,
+                    left: `${(boxPosition.left / (imageDimensions?.width || 1)) * 100}%`,
+                    top: `${(boxPosition.top / (imageDimensions?.height || 1)) * 100}%`,
+                    width: `${(boxPosition.width / (imageDimensions?.width || 1)) * 100}%`,
+                    height: `${(boxPosition.height / (imageDimensions?.height || 1)) * 100}%`,
                     borderWidth: "3px",
+                    borderStyle: "solid",
+                    backgroundColor: borderColor.replace('border-', 'rgba(').replace('bv-blue-400', '74, 58, 255, 0.1)').replace('purple-400', '204, 152, 246, 0.1)'),
                   }}
                 >
                   {/* Corner indicators */}
-                  <div className={cn("absolute -top-1.5 -left-1.5 w-3 h-3 rounded-full", bgColor.replace("bg-opacity-10", ""))} />
-                  <div className={cn("absolute -top-1.5 -right-1.5 w-3 h-3 rounded-full", bgColor.replace("bg-opacity-10", ""))} />
-                  <div className={cn("absolute -bottom-1.5 -left-1.5 w-3 h-3 rounded-full", bgColor.replace("bg-opacity-10", ""))} />
-                  <div className={cn("absolute -bottom-1.5 -right-1.5 w-3 h-3 rounded-full", bgColor.replace("bg-opacity-10", ""))} />
+                  <div className={cn("absolute -top-1.5 -left-1.5 w-3 h-3 rounded-full", borderColor.replace('border-', 'bg-'))} />
+                  <div className={cn("absolute -top-1.5 -right-1.5 w-3 h-3 rounded-full", borderColor.replace('border-', 'bg-'))} />
+                  <div className={cn("absolute -bottom-1.5 -left-1.5 w-3 h-3 rounded-full", borderColor.replace('border-', 'bg-'))} />
+                  <div className={cn("absolute -bottom-1.5 -right-1.5 w-3 h-3 rounded-full", borderColor.replace('border-', 'bg-'))} />
                 </div>
               )}
             </div>
@@ -261,30 +312,42 @@ export function DualPdfViewer({
   onDocumentChange,
   selectedRow,
 }: DualPdfViewerProps) {
-  // Start at 50% zoom in split view, 100% in single view
-  const [zoom, setZoom] = useState(splitView ? 50 : 100);
+  // Start at a reasonable zoom level
+  const [zoom, setZoom] = useState(75);
   const [rotation, setRotation] = useState(0);
 
-  // Update zoom when split view mode changes
-  useEffect(() => {
-    if (splitView) {
-      setZoom(50); // Fit full page in split view
-    } else {
-      setZoom(100); // Full size in single view
+  // Preset zoom levels
+  const zoomPresets = [25, 50, 75, 100, 125, 150, 200];
+  
+  const handleZoomIn = () => {
+    const currentIndex = zoomPresets.findIndex(z => z >= zoom);
+    if (currentIndex < zoomPresets.length - 1) {
+      setZoom(zoomPresets[currentIndex + 1]);
+    } else if (zoom < 200) {
+      setZoom(Math.min(zoom + 25, 200));
     }
-  }, [splitView]);
-
-  const handleZoomIn = () => setZoom(prev => Math.min(prev + 25, 200));
-  const handleZoomOut = () => setZoom(prev => Math.max(prev - 25, 25)); // Allow down to 25%
+  };
+  
+  const handleZoomOut = () => {
+    const currentIndex = zoomPresets.findIndex(z => z >= zoom);
+    if (currentIndex > 0) {
+      setZoom(zoomPresets[currentIndex - 1]);
+    } else if (zoom > 25) {
+      setZoom(Math.max(zoom - 25, 25));
+    }
+  };
+  
+  const handleZoomFit = () => {
+    // Reset to a reasonable fit size
+    setZoom(splitView ? 50 : 75);
+  };
+  
   const handleRotate = () => setRotation(prev => (prev + 90) % 360);
-
-  // Use zoom directly - we now set appropriate defaults per mode
-  const effectiveZoom = zoom;
 
   return (
     <div className="h-full flex flex-col bg-neutral-100">
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-neutral-200">
+      <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-neutral-200 shrink-0">
         {/* Left: View mode toggle */}
         <div className="flex items-center gap-2">
           {hasSubmittal && (
@@ -361,10 +424,11 @@ export function DualPdfViewer({
             onClick={handleZoomOut}
             disabled={zoom <= 25}
             className="h-7 w-7 p-0"
+            title="Zoom out"
           >
             <ZoomOut className="h-3.5 w-3.5" />
           </Button>
-          <span className="text-micro text-neutral-600 min-w-[40px] text-center">
+          <span className="text-micro text-neutral-600 min-w-[45px] text-center font-medium">
             {zoom}%
           </span>
           <Button
@@ -373,8 +437,18 @@ export function DualPdfViewer({
             onClick={handleZoomIn}
             disabled={zoom >= 200}
             className="h-7 w-7 p-0"
+            title="Zoom in"
           >
             <ZoomIn className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleZoomFit}
+            className="h-7 w-7 p-0"
+            title="Fit to view"
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
           </Button>
           <div className="w-px h-5 bg-neutral-200 mx-1" />
           <Button
@@ -382,6 +456,7 @@ export function DualPdfViewer({
             size="sm"
             onClick={handleRotate}
             className="h-7 w-7 p-0"
+            title="Rotate"
           >
             <RotateCw className="h-3.5 w-3.5" />
           </Button>
@@ -391,7 +466,7 @@ export function DualPdfViewer({
       {/* PDF Content Area */}
       {splitView ? (
         // Split view - show both side by side
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex overflow-hidden min-h-0">
           <SinglePdfPanel
             title="Specification"
             titleColor="text-bv-blue-600"
@@ -400,7 +475,7 @@ export function DualPdfViewer({
             totalPages={specTotalPages}
             onPageChange={onSpecPageChange}
             boundingBox={specBoundingBox}
-            zoom={effectiveZoom}
+            zoom={zoom}
             rotation={rotation}
             borderColor="border-bv-blue-400"
             bgColor="bg-bv-blue-100"
@@ -415,7 +490,7 @@ export function DualPdfViewer({
             totalPages={submittalTotalPages}
             onPageChange={onSubmittalPageChange}
             boundingBox={submittalBoundingBox}
-            zoom={effectiveZoom}
+            zoom={zoom}
             rotation={rotation}
             borderColor="border-purple-400"
             bgColor="bg-purple-100"
@@ -425,7 +500,7 @@ export function DualPdfViewer({
         </div>
       ) : (
         // Single view - show one document
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden min-h-0">
           {viewingDocument === "spec" ? (
             <SinglePdfPanel
               title="Specification"
