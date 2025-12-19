@@ -9,7 +9,8 @@ const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 // Configuration
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY_MS = 1000;
-const MAX_PAGES_PER_BATCH = 20; // Increased from 8 for faster processing
+const MAX_PAGES_PER_BATCH = 30; // Process many pages per call to reduce API requests
+const MAX_FINDINGS_PER_SPEC = 3; // Limit findings to prevent bloat
 
 interface PageImage {
   base64: string;
