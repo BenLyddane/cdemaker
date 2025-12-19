@@ -24,7 +24,7 @@ interface BoundingBox {
 
 export interface StatusAnnotation {
   boundingBox: BoundingBox;
-  status: "comply" | "deviate" | "exception" | "pending";
+  status: "comply" | "deviate" | "exception" | "not_found" | "pending";
   specField: string;
   pageNumber: number;
 }
@@ -55,8 +55,10 @@ function getStatusDisplay(status: StatusAnnotation["status"]) {
       return { letter: "D", bgColor: "bg-yellow-400", borderColor: "border-yellow-500", textColor: "text-neutral-800" };
     case "exception":
       return { letter: "E", bgColor: "bg-red-400", borderColor: "border-red-500", textColor: "text-white" };
+    case "not_found":
+      return { letter: "?", bgColor: "bg-purple-400", borderColor: "border-purple-500", textColor: "text-white" };
     case "pending":
-      return { letter: "?", bgColor: "bg-neutral-400", borderColor: "border-neutral-500", textColor: "text-white" };
+      return { letter: "P", bgColor: "bg-neutral-400", borderColor: "border-neutral-500", textColor: "text-white" };
     default:
       return { letter: "?", bgColor: "bg-neutral-400", borderColor: "border-neutral-500", textColor: "text-white" };
   }

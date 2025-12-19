@@ -12,6 +12,7 @@ const STATUS_CONFIG: Record<CDEStatus, { color: [number, number, number]; label:
   comply: { color: [11, 134, 75], label: "C", bgColor: [178, 255, 218] },      // Green
   deviate: { color: [204, 147, 0], label: "D", bgColor: [255, 236, 170] },     // Yellow
   exception: { color: [236, 67, 67], label: "E", bgColor: [255, 218, 218] },   // Red
+  not_found: { color: [147, 51, 234], label: "?", bgColor: [243, 232, 255] },  // Purple
   pending: { color: [108, 108, 113], label: "P", bgColor: [237, 237, 237] },   // Gray
 };
 

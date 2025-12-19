@@ -11,6 +11,7 @@ import {
   AlertTriangle, 
   XCircle, 
   Clock,
+  HelpCircle,
   ChevronDown,
   ChevronUp,
   Edit3,
@@ -44,7 +45,7 @@ interface ComparisonPanelProps {
 type FilterStatus = "all" | CDEStatus;
 
 function StatusBadge({ status }: { status: CDEStatus }) {
-  const config = {
+  const config: Record<CDEStatus, { icon: typeof CheckCircle2; label: string; className: string }> = {
     comply: {
       icon: CheckCircle2,
       label: "C",
@@ -59,6 +60,11 @@ function StatusBadge({ status }: { status: CDEStatus }) {
       icon: XCircle,
       label: "E",
       className: "bg-error-100 text-error-700 border-error-400",
+    },
+    not_found: {
+      icon: HelpCircle,
+      label: "?",
+      className: "bg-purple-100 text-purple-700 border-purple-400",
     },
     pending: {
       icon: Clock,
@@ -293,7 +299,7 @@ export function ComparisonPanel({
       if (sortField === "field") {
         comparison = a.specField.localeCompare(b.specField);
       } else if (sortField === "status") {
-        const statusOrder = { comply: 0, deviate: 1, exception: 2, pending: 3 };
+        const statusOrder: Record<CDEStatus, number> = { comply: 0, deviate: 1, exception: 2, not_found: 3, pending: 4 };
         comparison = statusOrder[a.status] - statusOrder[b.status];
       }
       return sortDirection === "asc" ? comparison : -comparison;

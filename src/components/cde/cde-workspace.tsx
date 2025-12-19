@@ -244,7 +244,7 @@ export function CDEWorkspace() {
       if (allFindings.length > 0) {
         // Sort findings by confidence then status
         const confidenceOrder = { high: 0, medium: 1, low: 2 };
-        const statusOrder = { comply: 0, deviate: 1, exception: 2, pending: 3 };
+        const statusOrder: Record<CDEStatus, number> = { comply: 0, deviate: 1, exception: 2, not_found: 3, pending: 4 };
         
         allFindings.sort((a, b) => {
           const confDiff = confidenceOrder[a.confidence] - confidenceOrder[b.confidence];

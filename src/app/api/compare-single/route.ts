@@ -209,7 +209,7 @@ function selectBestMatch(findings: SubmittalFinding[]): SubmittalFinding | null 
   
   // Sort by: confidence (high > medium > low), then status (comply > deviate > exception), then page
   const confidenceOrder = { high: 0, medium: 1, low: 2 };
-  const statusOrder = { comply: 0, deviate: 1, exception: 2, pending: 3 };
+  const statusOrder: Record<CDEStatus, number> = { comply: 0, deviate: 1, exception: 2, not_found: 3, pending: 4 };
   
   const sorted = [...findings].sort((a, b) => {
     // First by confidence

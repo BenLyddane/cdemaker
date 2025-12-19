@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { CheckCircle2, AlertTriangle, XCircle, Clock, ChevronDown } from "lucide-react";
+import { CheckCircle2, AlertTriangle, XCircle, Clock, HelpCircle, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CDEStatus } from "@/lib/types";
 
@@ -11,7 +11,14 @@ interface StatusSelectorProps {
   disabled?: boolean;
 }
 
-const statusConfig = {
+const statusConfig: Record<CDEStatus, {
+  icon: typeof CheckCircle2;
+  label: string;
+  shortLabel: string;
+  description: string;
+  className: string;
+  activeClassName: string;
+}> = {
   comply: {
     icon: CheckCircle2,
     label: "Comply",
@@ -35,6 +42,14 @@ const statusConfig = {
     description: "Does not meet requirements",
     className: "bg-error-100 text-error-700 border-error-400 hover:bg-error-100/80",
     activeClassName: "ring-2 ring-error-400",
+  },
+  not_found: {
+    icon: HelpCircle,
+    label: "Not Found",
+    shortLabel: "?",
+    description: "No match found in submittal",
+    className: "bg-purple-100 text-purple-700 border-purple-400 hover:bg-purple-100/80",
+    activeClassName: "ring-2 ring-purple-400",
   },
   pending: {
     icon: Clock,
