@@ -3,14 +3,14 @@ import { GoogleGenerativeAI, Part } from "@google/generative-ai";
 import type { ExtractedRow, CDEStatus, DocumentLocation, SubmittalFinding, BoundingBox } from "@/lib/types";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY || "");
-// Using gemini-3-pro-preview for accurate bounding box detection
-const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
+// Using flash for speed - pro is 5-10x slower
+const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
 // Configuration
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY_MS = 1000;
 const MAX_PAGES_PER_BATCH = 30; // Process many pages per call to reduce API requests
-const MAX_FINDINGS_PER_SPEC = 3; // Limit findings to prevent bloat
+const MAX_FINDINGS_PER_SPEC = 2; // Limit findings to prevent bloat
 
 interface PageImage {
   base64: string;
