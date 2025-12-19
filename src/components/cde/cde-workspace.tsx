@@ -571,9 +571,10 @@ export function CDEWorkspace() {
               addLog(`Page ${pageNum}: Extracted ${rowCount} requirements`, "success");
               
               // Queue rows for AI CDE if submittal is available
+              // IMPORTANT: Use timestampedRows (with correct IDs) not the raw API rows
               if (submittalPagesRef.current && submittalPagesRef.current.length > 0) {
                 addLog(`Queuing ${rowCount} items for AI CDE...`, "info");
-                queueRowsForAiCde(rows, doc.id);
+                queueRowsForAiCde(timestampedRows, doc.id);
               }
             } else {
               addLog(`Page ${pageNum}: No extractable requirements found`, "info");

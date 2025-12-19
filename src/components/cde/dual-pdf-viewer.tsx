@@ -514,7 +514,8 @@ export function DualPdfViewer({
         </div>
       ) : (
         // Single view - show one document
-        <div className="flex-1" style={{ minHeight: 0, overflow: 'hidden' }}>
+        // Note: flex flex-col is required for SinglePdfPanel's flex-1 to work properly
+        <div className="flex-1 flex flex-col" style={{ minHeight: 0, overflow: 'hidden' }}>
           {viewingDocument === "spec" ? (
             <SinglePdfPanel
               title="Specification"
