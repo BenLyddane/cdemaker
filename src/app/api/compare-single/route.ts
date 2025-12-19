@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI, Part } from "@google/generative-ai";
-import type { ExtractedRow, CDEStatus, DocumentLocation } from "@/lib/types";
+import type { ExtractedRow, CDEStatus, DocumentLocation, SubmittalFinding, BoundingBox } from "@/lib/types";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY || "");
-// Using gemini-3-flash-preview for faster processing
-const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+// Using gemini-2.0-flash for faster processing with large context
+const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
-const MAX_RETRIES = 2;
-const RETRY_DELAY_MS = 500;
-const MAX_PAGES_TO_CHECK = 8; // Check up to 8 pages for better coverage
+// Configuration
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY_MS = 1000;
+const MAX_PAGES_PER_BATCH = 20; // Increased from 8 for faster processing
 
 interface PageImage {
   base64: string;
@@ -16,25 +17,52 @@ interface PageImage {
   pageNumber: number;
 }
 
+interface BatchFinding {
+  pageNumber: number;
+  value: string;
+  unit?: string;
+  confidence: "high" | "medium" | "low";
+  boundingBox?: BoundingBox;
+  status: CDEStatus;
+  explanation: string;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
- * Compare a single spec requirement against submittal images visually
- * Returns AI CDE result with submittal location
+ * Generate a unique ID for findings
  */
-async function compareSpecToSubmittal(
+function generateFindingId(): string {
+  return `finding_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+}
+
+/**
+ * Check if error is a rate limit error (429)
+ */
+function isRateLimitError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    return message.includes("429") || 
+           message.includes("rate limit") || 
+           message.includes("quota") ||
+           message.includes("resource exhausted");
+  }
+  return false;
+}
+
+/**
+ * Compare a single spec requirement against a batch of submittal pages
+ * Returns ALL findings found in this batch
+ */
+async function compareSpecToBatch(
   specRow: ExtractedRow,
   submittalPages: PageImage[],
+  batchStartPage: number,
   retryCount: number = 0
 ): Promise<{
-  status: CDEStatus;
-  matchConfidence: "high" | "medium" | "low" | "not_found";
-  explanation: string;
-  submittalValue?: string;
-  submittalUnit?: string;
-  submittalLocation?: DocumentLocation;
+  findings: BatchFinding[];
   error?: string;
 }> {
   try {
@@ -47,7 +75,7 @@ SPECIFICATION REQUIREMENT TO VERIFY:
 - Section: ${specRow.section || "General"}
 - Spec Number: ${specRow.specNumber || "N/A"}
 
-TASK: Search through ALL the submittal pages provided and find where this specification value appears. Determine if the submittal meets the requirement.
+TASK: Search through ALL ${submittalPages.length} submittal pages provided (pages ${batchStartPage} to ${batchStartPage + submittalPages.length - 1}) and find EVERY occurrence where this specification field appears. Return ALL matches found.
 
 FIELD TYPE RULES:
 1. EXACT MATCH required for: Voltage, Phase, Model numbers, Part numbers, Dimensions, Connection sizes
@@ -55,13 +83,13 @@ FIELD TYPE RULES:
 3. LOWER IS BETTER (below = comply): Noise level (dB), Power consumption (watts)
 4. MATCH OR CLOSE: Flow rates, Capacity (±5% acceptable)
 
-COMPLIANCE STATUS:
+COMPLIANCE STATUS FOR EACH FINDING:
 - "comply": Submittal value matches OR exceeds spec (where higher is better) OR is below spec (where lower is better)
 - "deviate": Values differ slightly, may be acceptable with engineering review
 - "exception": Values incompatible, missing, or wrong direction
 
 CRITICAL - BOUNDING BOX REQUIREMENT:
-You MUST provide a bounding box when you find data in the submittal. The bounding box should surround the specific value/text you found.
+For EACH finding, you MUST provide a bounding box. The bounding box should surround the specific value/text you found.
 - x: normalized distance from LEFT edge (0 = left edge, 1 = right edge)
 - y: normalized distance from TOP edge (0 = top edge, 1 = bottom edge)
 - width/height: normalized size of the box
@@ -69,81 +97,165 @@ Estimate coordinates based on where the value appears in the page image. Be prec
 
 RESPOND WITH STRICT JSON:
 {
-  "status": "comply" | "deviate" | "exception",
-  "matchConfidence": "high" | "medium" | "low" | "not_found",
-  "foundOnPage": <page number where found, or null if not found>,
-  "submittalValue": "<actual value found in submittal, or null>",
-  "submittalUnit": "<unit from submittal if different from spec, or null>",
-  "boundingBox": {
-    "x": <float 0-1>,
-    "y": <float 0-1>,
-    "width": <float 0-1>,
-    "height": <float 0-1>
-  },
-  "explanation": "Brief explanation (max 20 words). State values and result."
+  "findings": [
+    {
+      "pageNumber": <actual page number where found>,
+      "value": "<exact value found in submittal>",
+      "unit": "<unit if present, or null>",
+      "confidence": "high" | "medium" | "low",
+      "status": "comply" | "deviate" | "exception",
+      "boundingBox": {
+        "x": <float 0-1>,
+        "y": <float 0-1>,
+        "width": <float 0-1>,
+        "height": <float 0-1>
+      },
+      "explanation": "Brief explanation (max 15 words)"
+    }
+  ]
 }
 
-NOTE: boundingBox is REQUIRED when foundOnPage is not null. Always provide coordinates!`;
+IMPORTANT:
+- Return ALL occurrences found, not just the first one
+- If nothing found in these pages, return {"findings": []}
+- Each finding must have a valid pageNumber from the range ${batchStartPage}-${batchStartPage + submittalPages.length - 1}
+- boundingBox is REQUIRED for each finding`;
 
-    // Create image parts from submittal pages (limit to first 8 pages for better coverage)
-    const pagesToSend = submittalPages.slice(0, MAX_PAGES_TO_CHECK);
-    const imageParts: Part[] = pagesToSend.map(page => ({
-      inlineData: { data: page.base64, mimeType: page.mimeType },
+    // Create image parts with page number labels
+    const imageParts: Part[] = submittalPages.map((page, idx) => ({
+      inlineData: { 
+        data: page.base64, 
+        mimeType: page.mimeType 
+      },
     }));
 
-    // Send prompt + all images
-    const result = await model.generateContent([prompt, ...imageParts]);
+    // Add text labels for page numbers
+    const pageLabels = submittalPages.map((_, idx) => 
+      `[Page ${batchStartPage + idx}]`
+    ).join(" ");
+
+    // Send prompt + page labels + all images
+    const result = await model.generateContent([
+      prompt,
+      `Page numbers in order: ${pageLabels}`,
+      ...imageParts
+    ]);
     const text = result.response.text();
 
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      throw new Error("No valid JSON found in response");
+      console.error("[compare-single] No valid JSON found in response:", text.substring(0, 200));
+      return { findings: [] };
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
     
-    // Build submittal location if found
-    let submittalLocation: DocumentLocation | undefined;
-    if (parsed.foundOnPage && parsed.boundingBox) {
-      submittalLocation = {
-        pageNumber: parsed.foundOnPage,
-        boundingBox: parsed.boundingBox,
-      };
-    } else if (parsed.foundOnPage) {
-      submittalLocation = {
-        pageNumber: parsed.foundOnPage,
-      };
-    }
+    // Validate and normalize findings
+    const validFindings: BatchFinding[] = (parsed.findings || [])
+      .filter((f: any) => 
+        f.pageNumber && 
+        f.value && 
+        f.pageNumber >= batchStartPage && 
+        f.pageNumber < batchStartPage + submittalPages.length
+      )
+      .map((f: any) => ({
+        pageNumber: f.pageNumber,
+        value: f.value,
+        unit: f.unit || undefined,
+        confidence: f.confidence || "medium",
+        boundingBox: f.boundingBox || undefined,
+        status: f.status || "deviate",
+        explanation: f.explanation || "Found in submittal",
+      }));
     
-    return {
-      status: parsed.status || "exception",
-      matchConfidence: parsed.matchConfidence || "low",
-      explanation: parsed.explanation || "Unable to determine",
-      submittalValue: parsed.submittalValue || undefined,
-      submittalUnit: parsed.submittalUnit || undefined,
-      submittalLocation,
-    };
+    return { findings: validFindings };
   } catch (error) {
-    if (retryCount < MAX_RETRIES) {
-      await sleep(RETRY_DELAY_MS * (retryCount + 1));
-      return compareSpecToSubmittal(specRow, submittalPages, retryCount + 1);
+    // Handle rate limiting with exponential backoff
+    if (isRateLimitError(error) && retryCount < MAX_RETRIES) {
+      const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, retryCount);
+      console.log(`[compare-single] Rate limited, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+      await sleep(delay);
+      return compareSpecToBatch(specRow, submittalPages, batchStartPage, retryCount + 1);
     }
     
+    // General retry for other errors
+    if (retryCount < MAX_RETRIES) {
+      const delay = INITIAL_RETRY_DELAY_MS * (retryCount + 1);
+      console.log(`[compare-single] Error, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES}):`, error);
+      await sleep(delay);
+      return compareSpecToBatch(specRow, submittalPages, batchStartPage, retryCount + 1);
+    }
+    
+    console.error("[compare-single] Batch failed after retries:", error);
     return {
-      status: "pending" as CDEStatus,
-      matchConfidence: "not_found",
-      explanation: "Comparison failed after retries",
+      findings: [],
       error: error instanceof Error ? error.message : "Unknown error",
     };
   }
 }
 
+/**
+ * Select the best match from all findings
+ * Priority: highest confidence, then "comply" status, then earliest page
+ */
+function selectBestMatch(findings: SubmittalFinding[]): SubmittalFinding | null {
+  if (findings.length === 0) return null;
+  
+  // Sort by: confidence (high > medium > low), then status (comply > deviate > exception), then page
+  const confidenceOrder = { high: 0, medium: 1, low: 2 };
+  const statusOrder = { comply: 0, deviate: 1, exception: 2, pending: 3 };
+  
+  const sorted = [...findings].sort((a, b) => {
+    // First by confidence
+    const confDiff = confidenceOrder[a.confidence] - confidenceOrder[b.confidence];
+    if (confDiff !== 0) return confDiff;
+    
+    // Then by status (prefer comply)
+    const statusDiff = statusOrder[a.status] - statusOrder[b.status];
+    if (statusDiff !== 0) return statusDiff;
+    
+    // Finally by page number (earlier is better)
+    return a.pageNumber - b.pageNumber;
+  });
+  
+  return sorted[0];
+}
+
+/**
+ * Determine overall status from all findings
+ */
+function determineOverallStatus(findings: SubmittalFinding[]): CDEStatus {
+  if (findings.length === 0) return "exception";
+  
+  // If any finding is "comply", overall is comply
+  if (findings.some(f => f.status === "comply")) return "comply";
+  
+  // If any finding is "deviate", overall is deviate
+  if (findings.some(f => f.status === "deviate")) return "deviate";
+  
+  // Otherwise exception
+  return "exception";
+}
+
+/**
+ * Determine overall match confidence
+ */
+function determineOverallConfidence(findings: SubmittalFinding[]): "high" | "medium" | "low" | "not_found" {
+  if (findings.length === 0) return "not_found";
+  
+  // Return the highest confidence among findings
+  if (findings.some(f => f.confidence === "high")) return "high";
+  if (findings.some(f => f.confidence === "medium")) return "medium";
+  return "low";
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { specRow, submittalPages } = body as {
+    const { specRow, submittalPages, scanAllPages = true } = body as {
       specRow: ExtractedRow;
       submittalPages: PageImage[];
+      scanAllPages?: boolean; // If false, only check first batch (legacy behavior)
     };
 
     if (!specRow) {
@@ -161,16 +273,92 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`[compare-single] Comparing: ${specRow.field} = ${specRow.value}`);
+    console.log(`[compare-single] Total submittal pages: ${submittalPages.length}, scanAllPages: ${scanAllPages}`);
     
-    const result = await compareSpecToSubmittal(specRow, submittalPages);
+    // Collect all findings from all batches
+    const allFindings: SubmittalFinding[] = [];
+    const errors: string[] = [];
     
-    console.log(`[compare-single] Result: ${result.status} (${result.matchConfidence})`);
+    // Determine how many pages to check
+    const pagesToCheck = scanAllPages ? submittalPages.length : Math.min(MAX_PAGES_PER_BATCH, submittalPages.length);
+    const totalBatches = Math.ceil(pagesToCheck / MAX_PAGES_PER_BATCH);
+    
+    // Process pages in batches
+    for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
+      const startIdx = batchIdx * MAX_PAGES_PER_BATCH;
+      const endIdx = Math.min(startIdx + MAX_PAGES_PER_BATCH, pagesToCheck);
+      const batchPages = submittalPages.slice(startIdx, endIdx);
+      const batchStartPage = batchPages[0]?.pageNumber || (startIdx + 1);
+      
+      console.log(`[compare-single] Processing batch ${batchIdx + 1}/${totalBatches} (pages ${batchStartPage}-${batchStartPage + batchPages.length - 1})`);
+      
+      const batchResult = await compareSpecToBatch(specRow, batchPages, batchStartPage);
+      
+      if (batchResult.error) {
+        errors.push(`Batch ${batchIdx + 1}: ${batchResult.error}`);
+      }
+      
+      // Add findings with unique IDs
+      for (const finding of batchResult.findings) {
+        allFindings.push({
+          id: generateFindingId(),
+          ...finding,
+        });
+      }
+      
+      // Small delay between batches to avoid rate limiting
+      if (batchIdx < totalBatches - 1) {
+        await sleep(200);
+      }
+    }
+    
+    console.log(`[compare-single] Found ${allFindings.length} total findings`);
+    
+    // Select best match and determine overall status
+    const bestMatch = selectBestMatch(allFindings);
+    const overallStatus = determineOverallStatus(allFindings);
+    const overallConfidence = determineOverallConfidence(allFindings);
+    
+    // Build submittal location from best match
+    let submittalLocation: DocumentLocation | undefined;
+    if (bestMatch) {
+      submittalLocation = {
+        pageNumber: bestMatch.pageNumber,
+        boundingBox: bestMatch.boundingBox,
+      };
+    }
+    
+    // Generate overall explanation
+    let explanation: string;
+    if (allFindings.length === 0) {
+      explanation = "No matching data found in submittal";
+    } else if (allFindings.length === 1) {
+      explanation = bestMatch?.explanation || "Found in submittal";
+    } else {
+      explanation = `${allFindings.length} occurrences found. Best match: ${bestMatch?.explanation || "See details"}`;
+    }
 
     return NextResponse.json({
       success: true,
       data: {
         rowId: specRow.id,
-        ...result,
+        
+        // All findings for multi-finding UI
+        findings: allFindings,
+        totalFindings: allFindings.length,
+        
+        // Best match for backward compatibility
+        status: overallStatus,
+        matchConfidence: overallConfidence,
+        explanation,
+        submittalValue: bestMatch?.value,
+        submittalUnit: bestMatch?.unit,
+        submittalLocation,
+        
+        // Processing stats
+        batchesProcessed: totalBatches,
+        pagesScanned: pagesToCheck,
+        errors: errors.length > 0 ? errors : undefined,
       },
     });
   } catch (error) {

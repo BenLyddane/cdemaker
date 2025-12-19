@@ -14,6 +14,8 @@ import {
   Search, 
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   Eye,
   Trash2,
   Edit3,
@@ -35,9 +37,10 @@ import {
   Upload,
   ArrowRight,
   Keyboard,
+  Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ExtractedRow, CDEStatus } from "@/lib/types";
+import type { ExtractedRow, CDEStatus, SubmittalFinding } from "@/lib/types";
 import type { ExtractionProgress } from "./cde-workspace";
 
 interface ExtractedDataPanelProps {
@@ -50,6 +53,7 @@ interface ExtractedDataPanelProps {
   onStatusChange?: (rowId: string, status: CDEStatus) => void;
   onCommentChange?: (rowId: string, comment: string) => void;
   onAcceptAiDecision?: (rowId: string) => void;
+  onActiveFindingChange?: (rowId: string, findingIndex: number) => void;
   isLoading: boolean;
   selectedRowId: string | null;
   extractionProgress?: ExtractionProgress | null;
@@ -259,6 +263,7 @@ interface DataRowProps {
   onStatusChange?: (status: CDEStatus) => void;
   onCommentChange?: (comment: string) => void;
   onAcceptAiDecision?: () => void;
+  onActiveFindingChange?: (findingIndex: number) => void;
   hasSubmittal?: boolean;
 }
 
@@ -273,6 +278,7 @@ function DataRow({
   onStatusChange,
   onCommentChange,
   onAcceptAiDecision,
+  onActiveFindingChange,
   hasSubmittal,
 }: DataRowProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -381,8 +387,75 @@ function DataRow({
       </td>
       
       {/* Submittal Value (if available) */}
-      <td className="px-3 py-2.5 text-detail text-neutral-600">
-        {row.submittalValue ? (
+      <td className="px-3 py-2.5 text-detail text-neutral-600" onClick={(e) => e.stopPropagation()}>
+        {row.submittalFindings && row.submittalFindings.length > 0 ? (
+          <div>
+            {/* Show current active finding value */}
+            <ValueWithHover 
+              value={row.submittalFindings[row.activeFindingIndex || 0]?.value || row.submittalValue || ""} 
+              unit={row.submittalFindings[row.activeFindingIndex || 0]?.unit || row.submittalUnit} 
+              maxWidth={120} 
+            />
+            
+            {/* Multi-finding navigation */}
+            <div className="flex items-center gap-1 mt-1">
+              {row.submittalFindings.length > 1 ? (
+                <>
+                  <Badge 
+                    variant="outline" 
+                    className="text-micro bg-purple-50 text-purple-600 border-purple-300 gap-1 px-1.5"
+                    title={`${row.submittalFindings.length} matches found in submittal`}
+                  >
+                    <Layers className="h-3 w-3" />
+                    {row.submittalFindings.length}
+                  </Badge>
+                  
+                  <div className="flex items-center gap-0.5">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-5 w-5 p-0 text-neutral-400 hover:text-bv-blue-500"
+                      onClick={() => {
+                        const currentIndex = row.activeFindingIndex || 0;
+                        const newIndex = currentIndex > 0 ? currentIndex - 1 : row.submittalFindings!.length - 1;
+                        onActiveFindingChange?.(newIndex);
+                      }}
+                      title="Previous match"
+                    >
+                      <ChevronLeft className="h-3 w-3" />
+                    </Button>
+                    <span className="text-micro text-neutral-500 min-w-[32px] text-center">
+                      {(row.activeFindingIndex || 0) + 1}/{row.submittalFindings.length}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-5 w-5 p-0 text-neutral-400 hover:text-bv-blue-500"
+                      onClick={() => {
+                        const currentIndex = row.activeFindingIndex || 0;
+                        const newIndex = currentIndex < row.submittalFindings!.length - 1 ? currentIndex + 1 : 0;
+                        onActiveFindingChange?.(newIndex);
+                      }}
+                      title="Next match"
+                    >
+                      <ChevronRight className="h-3 w-3" />
+                    </Button>
+                  </div>
+                  
+                  <span className="text-micro text-green-600 flex items-center gap-1">
+                    <Package className="h-3 w-3" />
+                    p.{row.submittalFindings[row.activeFindingIndex || 0]?.pageNumber}
+                  </span>
+                </>
+              ) : (
+                <span className="text-micro text-green-600 flex items-center gap-1">
+                  <Package className="h-3 w-3" />
+                  <span>p.{row.submittalFindings[0]?.pageNumber}</span>
+                </span>
+              )}
+            </div>
+          </div>
+        ) : row.submittalValue ? (
           <div>
             <ValueWithHover value={row.submittalValue} unit={row.submittalUnit} maxWidth={120} />
             {row.submittalLocation && (
@@ -610,6 +683,7 @@ export function ExtractedDataPanel({
   onStatusChange,
   onCommentChange,
   onAcceptAiDecision,
+  onActiveFindingChange,
   isLoading,
   selectedRowId,
   extractionProgress,
@@ -1037,6 +1111,7 @@ export function ExtractedDataPanel({
                 onStatusChange={onStatusChange ? (status) => onStatusChange(row.id, status) : undefined}
                 onCommentChange={onCommentChange ? (comment) => onCommentChange(row.id, comment) : undefined}
                 onAcceptAiDecision={onAcceptAiDecision ? () => onAcceptAiDecision(row.id) : undefined}
+                onActiveFindingChange={onActiveFindingChange ? (index) => onActiveFindingChange(row.id, index) : undefined}
                 hasSubmittal={hasSubmittal}
               />
             ))}

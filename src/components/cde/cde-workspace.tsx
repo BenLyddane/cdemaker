@@ -13,7 +13,7 @@ import { UserMenu } from "@/components/auth/user-menu";
 import { useUser } from "@stackframe/stack";
 import { isStackConfigured } from "@/lib/stack-client";
 import { ProjectsModal } from "@/components/projects/projects-modal";
-import type { ComparisonResult, CDEStatus, ExtractionResult, ExtractedRow } from "@/lib/types";
+import type { ComparisonResult, CDEStatus, ExtractionResult, ExtractedRow, SubmittalFinding } from "@/lib/types";
 import type { PageData } from "@/lib/pdf-utils";
 import { extractPages } from "@/lib/pdf-utils";
 import { generateCDEPdf, downloadPdf } from "@/lib/pdf-generator";
@@ -136,7 +136,7 @@ export function CDEWorkspace() {
     });
   }, []);
 
-  // Update a row with AI CDE results
+  // Update a row with AI CDE results (supports multiple findings)
   const updateRowWithAiResult = useCallback((rowId: string, result: {
     status: CDEStatus;
     matchConfidence: "high" | "medium" | "low" | "not_found";
@@ -144,6 +144,8 @@ export function CDEWorkspace() {
     submittalValue?: string;
     submittalUnit?: string;
     submittalLocation?: { pageNumber: number; boundingBox?: { x: number; y: number; width: number; height: number } };
+    findings?: SubmittalFinding[];
+    totalFindings?: number;
   }) => {
     setDocumentExtractions(prev => {
       const newMap = new Map(prev);
@@ -163,6 +165,9 @@ export function CDEWorkspace() {
             submittalUnit: result.submittalUnit,
             submittalLocation: result.submittalLocation,
             matchConfidence: result.matchConfidence,
+            // New multi-finding support
+            submittalFindings: result.findings || [],
+            activeFindingIndex: 0, // Start with best match (first in array)
           };
           newMap.set(docId, { ...extraction, rows: newRows });
           break;
@@ -172,24 +177,22 @@ export function CDEWorkspace() {
     });
   }, []);
 
-  // Process a single row with AI CDE
+  // Process a single row with AI CDE - now scans ALL pages in batches
   const processRowWithAiCde = useCallback(async (row: ExtractedRow, submittalPages: PageData[]) => {
     try {
-      // Limit to first 8 pages to balance payload size vs coverage
-      // Page 1-2 are often cover/TOC, technical specs typically on pages 3-8
-      const MAX_SUBMITTAL_PAGES = 8;
-      const pagesToSend = submittalPages.slice(0, MAX_SUBMITTAL_PAGES);
-      
+      // Send ALL pages - the API will batch them internally in groups of 20
+      // This enables multi-pass search to find all occurrences
       const response = await fetch("/api/compare-single", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           specRow: row,
-          submittalPages: pagesToSend.map(p => ({
+          submittalPages: submittalPages.map(p => ({
             base64: p.base64,
             mimeType: p.mimeType,
             pageNumber: p.pageNumber,
           })),
+          scanAllPages: true, // Enable full multi-pass search
         }),
       });
 
@@ -215,6 +218,11 @@ export function CDEWorkspace() {
       const result = await response.json();
       if (result.success && result.data) {
         updateRowWithAiResult(row.id, result.data);
+        
+        // Log multi-finding results
+        if (result.data.totalFindings > 1) {
+          console.log(`[AI CDE] Found ${result.data.totalFindings} occurrences for "${row.field}"`);
+        }
       }
     } catch (error) {
       console.error(`AI CDE error for row ${row.id}:`, error);
@@ -788,6 +796,48 @@ export function CDEWorkspace() {
     });
   }, []);
   
+  // Change the active finding index for a row (multi-finding navigation)
+  const handleActiveFindingChange = useCallback((rowId: string, findingIndex: number) => {
+    setDocumentExtractions(prev => {
+      const newMap = new Map(prev);
+      for (const [docId, extraction] of newMap.entries()) {
+        const rowIndex = extraction.rows.findIndex(r => r.id === rowId);
+        if (rowIndex !== -1) {
+          const newRows = [...extraction.rows];
+          const row = newRows[rowIndex];
+          const findings = row.submittalFindings || [];
+          
+          // Validate finding index
+          if (findingIndex >= 0 && findingIndex < findings.length) {
+            const activeFinding = findings[findingIndex];
+            
+            // Update row with new active finding
+            newRows[rowIndex] = { 
+              ...row, 
+              activeFindingIndex: findingIndex,
+              // Update the "best match" fields to reflect the active finding
+              submittalValue: activeFinding.value,
+              submittalUnit: activeFinding.unit,
+              submittalLocation: {
+                pageNumber: activeFinding.pageNumber,
+                boundingBox: activeFinding.boundingBox,
+              },
+              // Also update comment to show this finding's explanation
+              cdeComment: activeFinding.explanation,
+            };
+            
+            // Navigate PDF viewer to the finding's page
+            setSubmittalCurrentPage(activeFinding.pageNumber);
+          }
+          
+          newMap.set(docId, { ...extraction, rows: newRows });
+          break;
+        }
+      }
+      return newMap;
+    });
+  }, []);
+  
   // Create CDE (run comparison)
   const handleCreateCDE = useCallback(async () => {
     if (!submittalDocument) return;
@@ -1217,6 +1267,7 @@ export function CDEWorkspace() {
                 onStatusChange={handleExtractedRowStatusChange}
                 onCommentChange={handleExtractedRowCommentChange}
                 onAcceptAiDecision={handleAcceptAiDecision}
+                onActiveFindingChange={handleActiveFindingChange}
                 isLoading={isExtracting}
                 extractionProgress={extractionProgress}
                 hasSubmittal={!!submittalDocument}

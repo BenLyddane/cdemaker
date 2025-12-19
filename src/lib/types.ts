@@ -2,16 +2,31 @@
  * Core types for the CDE Maker application
  */
 
+// Bounding box for highlighting areas in documents
+export interface BoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 // Document location reference for linking back to source
 export interface DocumentLocation {
   pageNumber: number;
-  boundingBox?: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
+  boundingBox?: BoundingBox;
   textSnippet?: string;
+}
+
+// Individual finding from submittal document (multi-pass search result)
+export interface SubmittalFinding {
+  id: string;                           // Unique ID for this finding
+  pageNumber: number;
+  value: string;
+  unit?: string;
+  confidence: "high" | "medium" | "low";
+  boundingBox?: BoundingBox;
+  status: CDEStatus;                    // AI's suggested status for this finding
+  explanation: string;
 }
 
 // Extracted data row with location tracking and CDE review fields
@@ -40,10 +55,14 @@ export interface ExtractedRow {
   isAiProcessing?: boolean;        // True while AI CDE is running for this row
   
   // Submittal reference (populated by AI CDE when submittal is provided)
-  submittalValue?: string;         // Value found in submittal
-  submittalUnit?: string;          // Unit from submittal
-  submittalLocation?: DocumentLocation;  // Location in submittal document
+  submittalValue?: string;         // Value found in submittal (best match)
+  submittalUnit?: string;          // Unit from submittal (best match)
+  submittalLocation?: DocumentLocation;  // Location in submittal document (best match)
   matchConfidence?: "high" | "medium" | "low" | "not_found";  // AI confidence in match
+  
+  // Multi-pass search results - all findings from submittal
+  submittalFindings?: SubmittalFinding[];  // All findings from multi-pass search
+  activeFindingIndex?: number;              // Currently selected finding (0-based, default 0)
 }
 
 // CDE Status

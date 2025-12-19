@@ -282,7 +282,7 @@ export function DualPdfViewer({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => !splitView && onToggleSplitView()}
+                onClick={() => splitView && onToggleSplitView()}
                 className={cn(
                   "gap-1.5 h-7 px-2.5 rounded-md transition-colors",
                   !splitView 
@@ -296,7 +296,7 @@ export function DualPdfViewer({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => splitView && onToggleSplitView()}
+                onClick={() => !splitView && onToggleSplitView()}
                 className={cn(
                   "gap-1.5 h-7 px-2.5 rounded-md transition-colors",
                   splitView 
