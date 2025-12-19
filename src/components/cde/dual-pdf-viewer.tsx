@@ -113,13 +113,22 @@ function SinglePdfPanel({
 
   // Scroll to bounding box when it changes
   useEffect(() => {
-    if (boxPosition && containerRef.current && imageRef.current) {
+    if (boundingBox && containerRef.current && imageDimensions) {
       const container = containerRef.current;
       const zoomFactor = zoom / 100;
       
+      // Calculate pixel positions based on image dimensions and zoom
+      const imgWidth = imageDimensions.width * zoomFactor;
+      const imgHeight = imageDimensions.height * zoomFactor;
+      
+      const boxLeft = boundingBox.x * imgWidth;
+      const boxTop = boundingBox.y * imgHeight;
+      const boxWidth = boundingBox.width * imgWidth;
+      const boxHeight = boundingBox.height * imgHeight;
+      
       // Calculate the position to scroll to (center the bounding box in view)
-      const scrollLeft = (boxPosition.left * zoomFactor) - (container.clientWidth / 2) + ((boxPosition.width * zoomFactor) / 2);
-      const scrollTop = (boxPosition.top * zoomFactor) - (container.clientHeight / 2) + ((boxPosition.height * zoomFactor) / 2);
+      const scrollLeft = boxLeft - (container.clientWidth / 2) + (boxWidth / 2);
+      const scrollTop = boxTop - (container.clientHeight / 2) + (boxHeight / 2);
       
       container.scrollTo({
         left: Math.max(0, scrollLeft),
@@ -127,7 +136,7 @@ function SinglePdfPanel({
         behavior: 'smooth',
       });
     }
-  }, [boxPosition, zoom]);
+  }, [boundingBox, zoom, imageDimensions]);
 
   // Calculate scaled image dimensions based on zoom
   const scaledWidth = imageDimensions ? (imageDimensions.width * zoom) / 100 : undefined;
@@ -235,21 +244,23 @@ function SinglePdfPanel({
                 onLoad={handleImageLoad}
               />
               
-              {/* Bounding Box Overlay - scales with the image */}
-              {boxPosition && (
+              {/* Bounding Box Overlay - uses normalized coordinates directly as percentages */}
+              {boundingBox && (
                 <div
                   className={cn(
                     "absolute pointer-events-none rounded-sm animate-pulse",
                     borderColor
                   )}
                   style={{
-                    left: `${(boxPosition.left / (imageDimensions?.width || 1)) * 100}%`,
-                    top: `${(boxPosition.top / (imageDimensions?.height || 1)) * 100}%`,
-                    width: `${(boxPosition.width / (imageDimensions?.width || 1)) * 100}%`,
-                    height: `${(boxPosition.height / (imageDimensions?.height || 1)) * 100}%`,
+                    left: `${boundingBox.x * 100}%`,
+                    top: `${boundingBox.y * 100}%`,
+                    width: `${boundingBox.width * 100}%`,
+                    height: `${boundingBox.height * 100}%`,
                     borderWidth: "3px",
                     borderStyle: "solid",
-                    backgroundColor: borderColor.replace('border-', 'rgba(').replace('bv-blue-400', '74, 58, 255, 0.1)').replace('purple-400', '204, 152, 246, 0.1)'),
+                    backgroundColor: borderColor === 'border-bv-blue-400' 
+                      ? 'rgba(74, 58, 255, 0.1)' 
+                      : 'rgba(204, 152, 246, 0.1)',
                   }}
                 >
                   {/* Corner indicators */}
@@ -348,7 +359,7 @@ export function DualPdfViewer({
   const handleRotate = () => setRotation(prev => (prev + 90) % 360);
 
   return (
-    <div className="h-full flex flex-col bg-neutral-100">
+    <div className="flex-1 flex flex-col bg-neutral-100" style={{ minHeight: 0 }}>
       {/* Toolbar */}
       <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-neutral-200 shrink-0">
         {/* Left: View mode toggle */}
