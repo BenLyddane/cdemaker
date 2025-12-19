@@ -45,6 +45,56 @@ export interface ExtractionProgress {
 // Workflow phases
 type WorkflowPhase = "upload" | "extracting" | "reviewing" | "comparing" | "complete";
 
+// Smart batching configuration - stay well under Vercel's 4.5MB limit
+const TARGET_BATCH_SIZE_BYTES = 3 * 1024 * 1024; // 3MB target (safe margin)
+const MIN_PAGES_PER_BATCH = 1;
+const MAX_PAGES_PER_BATCH = 15; // Cap to avoid overly large API calls
+
+/**
+ * Create optimal batches of pages based on their actual base64 sizes
+ * This allows us to process multiple pages per request while staying under the 4.5MB Vercel limit
+ */
+function createOptimalBatches(pages: PageData[]): PageData[][] {
+  const batches: PageData[][] = [];
+  let currentBatch: PageData[] = [];
+  let currentSize = 0;
+  
+  for (const page of pages) {
+    // base64 string length roughly equals byte size
+    const pageSize = page.base64.length;
+    
+    // If adding this page would exceed target and we have pages, start new batch
+    if (currentSize + pageSize > TARGET_BATCH_SIZE_BYTES && currentBatch.length >= MIN_PAGES_PER_BATCH) {
+      batches.push(currentBatch);
+      currentBatch = [page];
+      currentSize = pageSize;
+    } 
+    // If current batch is at max pages, start new batch
+    else if (currentBatch.length >= MAX_PAGES_PER_BATCH) {
+      batches.push(currentBatch);
+      currentBatch = [page];
+      currentSize = pageSize;
+    }
+    else {
+      currentBatch.push(page);
+      currentSize += pageSize;
+    }
+  }
+  
+  // Don't forget the last batch
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+  
+  console.log(`[Smart Batching] Created ${batches.length} batches from ${pages.length} pages`);
+  batches.forEach((batch, i) => {
+    const batchSize = batch.reduce((sum, p) => sum + p.base64.length, 0);
+    console.log(`  Batch ${i + 1}: ${batch.length} pages, ~${(batchSize / 1024 / 1024).toFixed(2)}MB`);
+  });
+  
+  return batches;
+}
+
 export function CDEWorkspace() {
   // Document state - separate spec/schedule from submittal
   const [specDocuments, setSpecDocuments] = useState<UploadedDocument[]>([]);
@@ -81,6 +131,9 @@ export function CDEWorkspace() {
   const aiCdeProcessingRef = useRef<boolean>(false);
   const aiCdePausedRef = useRef<boolean>(false);
   const submittalPagesRef = useRef<PageData[] | null>(null);
+  
+  // Pre-computed batches for submittal pages (computed once when submittal is uploaded)
+  const submittalBatchesRef = useRef<PageData[][] | null>(null);
   
   // View state
   const [viewingDocId, setViewingDocId] = useState<string | null>(null);
@@ -178,23 +231,57 @@ export function CDEWorkspace() {
     });
   }, []);
 
-  // Process a single row with AI CDE - sends pages one at a time to stay under Vercel's 4.5MB limit
+  // Helper to update row progress during AI CDE processing
+  const updateRowProgress = useCallback((rowId: string, progressUpdate: Partial<ExtractedRow>) => {
+    setDocumentExtractions(prev => {
+      const newMap = new Map(prev);
+      for (const [docId, extraction] of newMap.entries()) {
+        const rowIndex = extraction.rows.findIndex(r => r.id === rowId);
+        if (rowIndex !== -1) {
+          const newRows = [...extraction.rows];
+          newRows[rowIndex] = { ...newRows[rowIndex], ...progressUpdate };
+          newMap.set(docId, { ...extraction, rows: newRows });
+          break;
+        }
+      }
+      return newMap;
+    });
+  }, []);
+
+  // Process a single row with AI CDE - uses smart batching to maximize pages per request
   const processRowWithAiCde = useCallback(async (row: ExtractedRow, submittalPages: PageData[]) => {
-    // Vercel has a 4.5MB request body limit - send pages one at a time to guarantee staying under limit
-    const PAGES_PER_BATCH = 1; // Single page per request to avoid 413 errors
+    // Use pre-computed batches if available, otherwise compute them
+    const batches = submittalBatchesRef.current || createOptimalBatches(submittalPages);
+    const totalBatches = batches.length;
+    const totalPages = submittalPages.length;
+    
+    // Update row to show scanning status with total info
+    updateRowProgress(row.id, {
+      aiCdeStatus: "scanning",
+      aiCdeTotalPages: totalPages,
+      aiCdeTotalBatches: totalBatches,
+      aiCdePagesScanned: 0,
+      aiCdeBatchesCompleted: 0,
+    });
     
     try {
       const allFindings: SubmittalFinding[] = [];
-      const totalBatches = Math.ceil(submittalPages.length / PAGES_PER_BATCH);
       let hasError = false;
+      let pagesScanned = 0;
       
-      console.log(`[AI CDE] Processing "${row.field}" across ${submittalPages.length} pages in ${totalBatches} batches`);
+      console.log(`[AI CDE] Processing "${row.field}" across ${totalPages} pages in ${totalBatches} batches (smart batching)`);
       
-      // Process pages in batches
+      // Process pages using smart batches
       for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
-        const startIdx = batchIdx * PAGES_PER_BATCH;
-        const endIdx = Math.min(startIdx + PAGES_PER_BATCH, submittalPages.length);
-        const batchPages = submittalPages.slice(startIdx, endIdx);
+        const batchPages = batches[batchIdx];
+        const startPage = batchPages[0]?.pageNumber || 1;
+        const endPage = batchPages[batchPages.length - 1]?.pageNumber || batchPages.length;
+        
+        // Update progress - show which pages are being scanned
+        updateRowProgress(row.id, {
+          aiCdePagesScanned: pagesScanned,
+          aiCdeBatchesCompleted: batchIdx,
+        });
         
         try {
           const response = await fetch("/api/compare-single", {
@@ -211,16 +298,25 @@ export function CDEWorkspace() {
               batchInfo: {
                 batchIndex: batchIdx,
                 totalBatches,
-                startPage: batchPages[0]?.pageNumber || startIdx + 1,
-                endPage: batchPages[batchPages.length - 1]?.pageNumber || endIdx,
-                totalPages: submittalPages.length,
+                startPage,
+                endPage,
+                totalPages,
               },
             }),
           });
 
           if (!response.ok) {
-            console.error(`[AI CDE] Batch ${batchIdx + 1}/${totalBatches} failed for row ${row.id}: ${response.status}`);
+            const statusCode = response.status;
+            console.error(`[AI CDE] Batch ${batchIdx + 1}/${totalBatches} failed for row ${row.id}: ${statusCode}`);
+            
+            // If we hit a 413 (payload too large), log for debugging
+            if (statusCode === 413) {
+              const batchSize = batchPages.reduce((sum, p) => sum + p.base64.length, 0);
+              console.error(`[AI CDE] 413 Error - batch was ${(batchSize / 1024 / 1024).toFixed(2)}MB with ${batchPages.length} pages`);
+            }
+            
             hasError = true;
+            pagesScanned += batchPages.length;
             continue; // Try next batch even if this one fails
           }
 
@@ -229,6 +325,8 @@ export function CDEWorkspace() {
             allFindings.push(...result.data.findings);
           }
           
+          pagesScanned += batchPages.length;
+          
           // Small delay between batches to avoid rate limiting
           if (batchIdx < totalBatches - 1) {
             await new Promise(resolve => setTimeout(resolve, 100));
@@ -236,9 +334,16 @@ export function CDEWorkspace() {
         } catch (batchError) {
           console.error(`[AI CDE] Batch ${batchIdx + 1}/${totalBatches} error:`, batchError);
           hasError = true;
+          pagesScanned += batchPages.length;
           // Continue with next batch
         }
       }
+      
+      // Final progress update
+      updateRowProgress(row.id, {
+        aiCdePagesScanned: totalPages,
+        aiCdeBatchesCompleted: totalBatches,
+      });
       
       // If we got any findings, update the row with aggregated results
       if (allFindings.length > 0) {
@@ -309,7 +414,7 @@ export function CDEWorkspace() {
         return newMap;
       });
     }
-  }, [updateRowWithAiResult]);
+  }, [updateRowWithAiResult, updateRowProgress]);
 
   // Process the AI CDE queue
   const processAiCdeQueue = useCallback(async () => {
@@ -356,15 +461,32 @@ export function CDEWorkspace() {
 
   // Queue rows for AI CDE processing
   const queueRowsForAiCde = useCallback((rows: ExtractedRow[], docId: string) => {
-    // Mark rows as AI processing
+    // Calculate starting queue position (existing queue + 1)
+    const startQueuePosition = aiCdeQueueRef.current.length + 1;
+    const totalPages = submittalPagesRef.current?.length || 0;
+    const totalBatches = submittalBatchesRef.current?.length || Math.ceil(totalPages / MAX_PAGES_PER_BATCH);
+    
+    // Mark rows as queued with queue positions
     setDocumentExtractions(prev => {
       const current = prev.get(docId);
       if (!current) return prev;
       
       const newMap = new Map(prev);
+      let queuePosition = startQueuePosition;
+      
       const newRows = current.rows.map(r => {
-        if (rows.some(newRow => newRow.id === r.id)) {
-          return { ...r, isAiProcessing: true };
+        const matchingRow = rows.find(newRow => newRow.id === r.id);
+        if (matchingRow) {
+          return { 
+            ...r, 
+            isAiProcessing: true,
+            aiCdeStatus: "queued" as const,
+            aiCdeQueuePosition: queuePosition++,
+            aiCdeTotalPages: totalPages,
+            aiCdeTotalBatches: totalBatches,
+            aiCdePagesScanned: 0,
+            aiCdeBatchesCompleted: 0,
+          };
         }
         return r;
       });
@@ -643,6 +765,10 @@ export function CDEWorkspace() {
       
       // Store pages in ref for AI CDE processing
       submittalPagesRef.current = pages;
+      
+      // Pre-compute optimal batches for this submittal (done once, reused for all rows)
+      submittalBatchesRef.current = createOptimalBatches(pages);
+      console.log(`[Submittal] Pre-computed ${submittalBatchesRef.current.length} batches for ${pages.length} pages`);
       
       // Detect document type to confirm it's a submittal
       const detectResponse = await fetch("/api/extract", {

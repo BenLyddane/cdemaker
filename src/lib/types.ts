@@ -54,6 +54,15 @@ export interface ExtractedRow {
   humanConfirmedAt?: string;       // ISO timestamp when user confirmed/changed
   isAiProcessing?: boolean;        // True while AI CDE is running for this row
   
+  // AI CDE Progress Tracking (for detailed status display)
+  aiCdeStatus?: "queued" | "scanning" | "complete" | "error";  // Granular AI CDE status
+  aiCdeQueuePosition?: number;     // Position in queue (1-based, undefined = not queued)
+  aiCdePagesScanned?: number;      // Pages checked so far
+  aiCdeTotalPages?: number;        // Total pages to check
+  aiCdeBatchesCompleted?: number;  // Batches completed
+  aiCdeTotalBatches?: number;      // Total batches to process
+  aiCdeError?: string;             // Error message if status is "error"
+  
   // Submittal reference (populated by AI CDE when submittal is provided)
   submittalValue?: string;         // Value found in submittal (best match)
   submittalUnit?: string;          // Unit from submittal (best match)

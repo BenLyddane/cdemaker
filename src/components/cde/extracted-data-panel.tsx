@@ -494,11 +494,58 @@ function DataRow({
       {/* CDE Status */}
       <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2">
-          {/* AI Processing Loader */}
+          {/* Detailed AI Processing Status */}
           {row.isAiProcessing && (
-            <div className="flex items-center gap-1.5 text-purple-600">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-micro">AI checking...</span>
+            <div className="flex flex-col gap-0.5">
+              {/* Queued status - show queue position */}
+              {row.aiCdeStatus === "queued" && (
+                <div className="flex items-center gap-1.5 text-neutral-500">
+                  <Clock className="h-3.5 w-3.5" />
+                  <span className="text-micro font-medium">
+                    Queued #{row.aiCdeQueuePosition || "?"}
+                  </span>
+                  {row.aiCdeTotalPages && (
+                    <span className="text-micro text-neutral-400">
+                      ({row.aiCdeTotalPages} pages)
+                    </span>
+                  )}
+                </div>
+              )}
+              
+              {/* Scanning status - show progress */}
+              {row.aiCdeStatus === "scanning" && (
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5 text-purple-600">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <span className="text-micro font-medium">
+                      Scanning batch {(row.aiCdeBatchesCompleted || 0) + 1}/{row.aiCdeTotalBatches || "?"}
+                    </span>
+                  </div>
+                  {row.aiCdeTotalPages && (
+                    <div className="flex items-center gap-1">
+                      <div className="h-1 w-16 bg-neutral-200 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-purple-500 transition-all duration-300"
+                          style={{ 
+                            width: `${Math.round(((row.aiCdePagesScanned || 0) / row.aiCdeTotalPages) * 100)}%` 
+                          }}
+                        />
+                      </div>
+                      <span className="text-micro text-neutral-400">
+                        {row.aiCdePagesScanned || 0}/{row.aiCdeTotalPages}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* Fallback for old-style isAiProcessing without detailed status */}
+              {!row.aiCdeStatus && (
+                <div className="flex items-center gap-1.5 text-purple-600">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-micro">AI checking...</span>
+                </div>
+              )}
             </div>
           )}
           
