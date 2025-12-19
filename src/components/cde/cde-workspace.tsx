@@ -51,6 +51,7 @@ const MIN_PAGES_PER_BATCH = 1;
 const MAX_PAGES_PER_BATCH = 15; // Cap to avoid overly large API calls
 const ROWS_PER_BATCH = 5; // Process 5 spec rows per API call for 5x speedup
 const SPECS_PER_PAGE_DETECT = 10; // How many specs to process in one page detection call
+const PHASE1_CONCURRENT_BATCHES = 3; // Run 3 concurrent Phase 1 API calls for speed
 
 // Two-phase processing mode
 type ProcessingMode = "full-scan" | "two-phase";
@@ -610,33 +611,30 @@ export function CDEWorkspace() {
     aiCdeProcessingRef.current = false;
   }, [processBatchWithAiCde]);
 
-  // Queue rows for AI CDE processing
-  const queueRowsForAiCde = useCallback((rows: ExtractedRow[], docId: string) => {
-    // Calculate starting queue position (existing queue + 1)
-    const startQueuePosition = aiCdeQueueRef.current.length + 1;
-    const totalPages = submittalPagesRef.current?.length || 0;
-    const totalBatches = submittalBatchesRef.current?.length || Math.ceil(totalPages / MAX_PAGES_PER_BATCH);
+  // NEW: Two-phase processing - Phase 1 uses fast page detection with quick CDE
+  const processRowsWithPhase1 = useCallback(async (rows: ExtractedRow[], docId: string) => {
+    if (!submittalPagesRef.current || submittalPagesRef.current.length === 0) return;
     
-    // Mark rows as queued with queue positions
+    const submittalPages = submittalPagesRef.current;
+    const totalRows = rows.length;
+    
+    console.log(`[Phase 1] Processing ${totalRows} specs with fast page detection...`);
+    
+    // Mark all rows as processing Phase 1
     setDocumentExtractions(prev => {
       const current = prev.get(docId);
       if (!current) return prev;
       
       const newMap = new Map(prev);
-      let queuePosition = startQueuePosition;
-      
+      const rowIds = new Set(rows.map(r => r.id));
       const newRows = current.rows.map(r => {
-        const matchingRow = rows.find(newRow => newRow.id === r.id);
-        if (matchingRow) {
+        if (rowIds.has(r.id)) {
           return { 
             ...r, 
             isAiProcessing: true,
-            aiCdeStatus: "queued" as const,
-            aiCdeQueuePosition: queuePosition++,
-            aiCdeTotalPages: totalPages,
-            aiCdeTotalBatches: totalBatches,
+            aiCdeStatus: "scanning" as const,
             aiCdePagesScanned: 0,
-            aiCdeBatchesCompleted: 0,
+            aiCdeTotalPages: submittalPages.length,
           };
         }
         return r;
@@ -644,13 +642,135 @@ export function CDEWorkspace() {
       newMap.set(docId, { ...current, rows: newRows });
       return newMap;
     });
+    
+    // Process specs in batches with concurrency
+    const specBatches: ExtractedRow[][] = [];
+    for (let i = 0; i < rows.length; i += SPECS_PER_PAGE_DETECT) {
+      specBatches.push(rows.slice(i, i + SPECS_PER_PAGE_DETECT));
+    }
+    
+    console.log(`[Phase 1] Split ${totalRows} specs into ${specBatches.length} batches of ${SPECS_PER_PAGE_DETECT}`);
+    
+    // Process batches with controlled concurrency
+    const results: Map<string, { status: CDEStatus; confidence: string; explanation: string; bestValue?: string; bestPage?: number; relevantPages: number[] }> = new Map();
+    
+    for (let i = 0; i < specBatches.length; i += PHASE1_CONCURRENT_BATCHES) {
+      const concurrentBatches = specBatches.slice(i, i + PHASE1_CONCURRENT_BATCHES);
+      
+      // Run PHASE1_CONCURRENT_BATCHES in parallel
+      const batchPromises = concurrentBatches.map(async (batch, batchOffset) => {
+        const batchIndex = i + batchOffset;
+        console.log(`[Phase 1] Processing batch ${batchIndex + 1}/${specBatches.length} (${batch.length} specs)`);
+        
+        try {
+          const response = await fetch("/api/compare-pages", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              specRows: batch,
+              submittalPages: submittalPages.map(p => ({
+                base64: p.base64,
+                mimeType: p.mimeType,
+                pageNumber: p.pageNumber,
+              })),
+            }),
+          });
+          
+          if (!response.ok) {
+            console.error(`[Phase 1] Batch ${batchIndex + 1} failed: ${response.status}`);
+            return null;
+          }
+          
+          const result = await response.json();
+          return result.success ? result.data.results : null;
+        } catch (error) {
+          console.error(`[Phase 1] Batch ${batchIndex + 1} error:`, error);
+          return null;
+        }
+      });
+      
+      const batchResults = await Promise.all(batchPromises);
+      
+      // Collect results
+      for (const batchResult of batchResults) {
+        if (batchResult) {
+          for (const r of batchResult) {
+            results.set(r.specId, {
+              status: r.status as CDEStatus,
+              confidence: r.confidence,
+              explanation: r.explanation || "Quick scan result",
+              bestValue: r.bestValue,
+              bestPage: r.bestPage,
+              relevantPages: r.relevantPages || [],
+            });
+          }
+        }
+      }
+      
+      // Update progress after each concurrent group
+      const processedCount = Math.min((i + PHASE1_CONCURRENT_BATCHES) * SPECS_PER_PAGE_DETECT, totalRows);
+      console.log(`[Phase 1] Progress: ${processedCount}/${totalRows} specs processed`);
+      
+      // Small delay between concurrent groups to avoid rate limits
+      if (i + PHASE1_CONCURRENT_BATCHES < specBatches.length) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+    }
+    
+    console.log(`[Phase 1] Complete! Got results for ${results.size}/${totalRows} specs`);
+    
+    // Update all rows with Phase 1 results
+    setDocumentExtractions(prev => {
+      const current = prev.get(docId);
+      if (!current) return prev;
+      
+      const newMap = new Map(prev);
+      const newRows = current.rows.map(r => {
+        const result = results.get(r.id);
+        if (result) {
+          // Map confidence string to our type
+          const matchConfidence: "high" | "medium" | "low" | "not_found" = 
+            result.status === "not_found" ? "not_found" :
+            result.confidence === "high" ? "high" :
+            result.confidence === "medium" ? "medium" : "low";
+          
+          return {
+            ...r,
+            isAiProcessing: false,
+            cdeStatus: result.status,
+            cdeComment: result.explanation,
+            cdeSource: "ai" as const,
+            aiSuggestedStatus: result.status,
+            aiSuggestedComment: result.explanation,
+            matchConfidence,
+            submittalValue: result.bestValue,
+            submittalLocation: result.bestPage ? { pageNumber: result.bestPage } : undefined,
+            // Store relevant pages for potential Phase 2 bounding box extraction
+            relevantPages: result.relevantPages,
+          };
+        }
+        // If no result, mark as not found
+        return {
+          ...r,
+          isAiProcessing: false,
+          cdeStatus: "not_found" as CDEStatus,
+          cdeComment: "No relevant data found",
+          matchConfidence: "not_found" as const,
+        };
+      });
+      newMap.set(docId, { ...current, rows: newRows });
+      return newMap;
+    });
+    
+  }, []);
 
-    // Add to queue
-    aiCdeQueueRef.current.push(...rows);
-
-    // Start processing if not already running
-    processAiCdeQueue();
-  }, [processAiCdeQueue]);
+  // Queue rows for AI CDE processing - now uses two-phase approach
+  const queueRowsForAiCde = useCallback((rows: ExtractedRow[], docId: string) => {
+    // Use two-phase processing for better performance
+    // Phase 1: Fast page detection + quick CDE (uses Gemini Flash)
+    // Phase 2: Only triggered on-demand for bounding box extraction
+    processRowsWithPhase1(rows, docId);
+  }, [processRowsWithPhase1]);
 
   // Process a spec/schedule document with page-by-page extraction
   const processSpecDocument = useCallback(async (doc: UploadedDocument) => {

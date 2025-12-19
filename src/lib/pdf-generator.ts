@@ -103,10 +103,10 @@ export async function generateCDEPdf(
   }
   
   // =========================================================================
-  // Submittal Pages
+  // Submittal Pages (ALL pages, not just matched ones)
   // =========================================================================
   if (submittalPages.length > 0) {
-    // Group rows by submittal page
+    // Group rows by submittal page for annotation
     const rowsBySubmittalPage = new Map<number, ExtractedRow[]>();
     rowsToInclude.forEach(row => {
       if (row.submittalLocation?.pageNumber) {
@@ -118,29 +118,37 @@ export async function generateCDEPdf(
       }
     });
     
-    if (rowsBySubmittalPage.size > 0) {
-      // Add section header
-      pdf.addPage();
-      addSectionHeader(pdf, "PART 2: SUBMITTAL PAGES", pageWidth, margin);
+    // Add section header
+    pdf.addPage();
+    addSectionHeader(pdf, "PART 2: SUBMITTAL PAGES", pageWidth, margin);
+    
+    // Add ALL submittal pages (annotated if they have matched data)
+    for (const submittalPage of submittalPages) {
+      const pageRows = rowsBySubmittalPage.get(submittalPage.pageNumber) || [];
       
-      // Add each submittal page that has matched data
-      for (const submittalPage of submittalPages) {
-        const pageRows = rowsBySubmittalPage.get(submittalPage.pageNumber);
-        if (!pageRows || pageRows.length === 0) continue;
-        
-        pdf.addPage();
-        await addAnnotatedPage(
-          pdf, 
-          submittalPage, 
-          pageRows, 
-          "submittal",
-          pageWidth, 
-          pageHeight, 
-          margin, 
-          contentWidth
-        );
-      }
+      pdf.addPage();
+      await addAnnotatedPage(
+        pdf, 
+        submittalPage, 
+        pageRows, 
+        "submittal",
+        pageWidth, 
+        pageHeight, 
+        margin, 
+        contentWidth
+      );
     }
+  }
+  
+  // =========================================================================
+  // PART 3: Detailed Data Table (Full Data Appendix)
+  // =========================================================================
+  if (rowsToInclude.length > 0) {
+    pdf.addPage();
+    addSectionHeader(pdf, "PART 3: DETAILED DATA TABLE", pageWidth, margin);
+    
+    pdf.addPage();
+    addDetailedDataTable(pdf, rowsToInclude, pageWidth, pageHeight, margin);
   }
   
   // Return as blob
@@ -189,15 +197,17 @@ function addTitlePage(
     comply: rows.filter(r => r.cdeStatus === "comply").length,
     deviate: rows.filter(r => r.cdeStatus === "deviate").length,
     exception: rows.filter(r => r.cdeStatus === "exception").length,
+    notFound: rows.filter(r => r.cdeStatus === "not_found").length,
     pending: rows.filter(r => !r.cdeStatus || r.cdeStatus === "pending").length,
-    reviewed: rows.filter(r => r.isReviewed).length,
+    // Reviewed = any item with a definitive status (C/D/E/?)
+    reviewed: rows.filter(r => r.cdeStatus && r.cdeStatus !== "pending").length,
   };
   
   const summaryY = margin + 180;
-  const boxWidth = 100;
+  const boxWidth = 85;
   const boxHeight = 70;
-  const gap = 20;
-  const totalBoxWidth = (boxWidth * 4) + (gap * 3);
+  const gap = 15;
+  const totalBoxWidth = (boxWidth * 5) + (gap * 4);
   const startX = (pageWidth - totalBoxWidth) / 2;
   
   // Summary boxes
@@ -205,6 +215,7 @@ function addTitlePage(
     { label: "Comply", count: summary.comply, color: STATUS_CONFIG.comply },
     { label: "Deviate", count: summary.deviate, color: STATUS_CONFIG.deviate },
     { label: "Exception", count: summary.exception, color: STATUS_CONFIG.exception },
+    { label: "Not Found", count: summary.notFound, color: STATUS_CONFIG.not_found },
     { label: "Pending", count: summary.pending, color: STATUS_CONFIG.pending },
   ];
   
@@ -246,6 +257,7 @@ function addTitlePage(
     { badge: "C", label: "Comply - Submittal meets specification requirements", color: STATUS_CONFIG.comply },
     { badge: "D", label: "Deviate - Submittal differs from specification but may be acceptable", color: STATUS_CONFIG.deviate },
     { badge: "E", label: "Exception - Submittal does not meet specification requirements", color: STATUS_CONFIG.exception },
+    { badge: "?", label: "Not Found - Could not locate matching value in submittal", color: STATUS_CONFIG.not_found },
     { badge: "P", label: "Pending - Not yet reviewed", color: STATUS_CONFIG.pending },
   ];
   
@@ -505,6 +517,172 @@ function wrapText(text: string, maxChars: number): string[] {
   
   if (currentLine) lines.push(currentLine);
   return lines;
+}
+
+/**
+ * Add detailed data table showing all data without truncation
+ */
+function addDetailedDataTable(
+  pdf: jsPDF,
+  rows: ExtractedRow[],
+  pageWidth: number,
+  pageHeight: number,
+  margin: number
+) {
+  const contentWidth = pageWidth - (margin * 2);
+  const lineHeight = 14;
+  const headerHeight = 30;
+  let currentY = margin + 20;
+  
+  // Column widths (proportional)
+  const colWidths = {
+    status: contentWidth * 0.06,
+    spec: contentWidth * 0.10,
+    field: contentWidth * 0.20,
+    specValue: contentWidth * 0.22,
+    submittalValue: contentWidth * 0.22,
+    comment: contentWidth * 0.20,
+  };
+  
+  // Column positions
+  const colX = {
+    status: margin,
+    spec: margin + colWidths.status,
+    field: margin + colWidths.status + colWidths.spec,
+    specValue: margin + colWidths.status + colWidths.spec + colWidths.field,
+    submittalValue: margin + colWidths.status + colWidths.spec + colWidths.field + colWidths.specValue,
+    comment: margin + colWidths.status + colWidths.spec + colWidths.field + colWidths.specValue + colWidths.submittalValue,
+  };
+  
+  // Draw table header
+  const drawTableHeader = () => {
+    // Header background
+    pdf.setFillColor(74, 58, 255); // BV Blue
+    pdf.rect(margin, currentY, contentWidth, headerHeight, "F");
+    
+    // Header text
+    pdf.setFontSize(9);
+    pdf.setFont("helvetica", "bold");
+    pdf.setTextColor(255, 255, 255);
+    
+    pdf.text("Status", colX.status + 4, currentY + 18);
+    pdf.text("Spec #", colX.spec + 4, currentY + 18);
+    pdf.text("Field", colX.field + 4, currentY + 18);
+    pdf.text("Spec Value", colX.specValue + 4, currentY + 18);
+    pdf.text("Submittal Value", colX.submittalValue + 4, currentY + 18);
+    pdf.text("Comment", colX.comment + 4, currentY + 18);
+    
+    currentY += headerHeight;
+  };
+  
+  // Check if we need a new page
+  const checkNewPage = (requiredHeight: number) => {
+    if (currentY + requiredHeight > pageHeight - margin) {
+      pdf.addPage();
+      currentY = margin + 20;
+      drawTableHeader();
+    }
+  };
+  
+  // Draw initial header
+  drawTableHeader();
+  
+  // Draw each row
+  rows.forEach((row, index) => {
+    // Calculate row height based on content
+    const fieldLines = wrapText(row.field || "", 20);
+    const specValueLines = wrapText(row.value || "", 22);
+    const submittalValueLines = wrapText(row.submittalValue || "—", 22);
+    const commentLines = wrapText(row.cdeComment || "", 20);
+    
+    const maxLines = Math.max(
+      fieldLines.length,
+      specValueLines.length,
+      submittalValueLines.length,
+      commentLines.length,
+      1
+    );
+    const rowHeight = Math.max(maxLines * lineHeight + 10, 30);
+    
+    // Check if we need new page
+    checkNewPage(rowHeight);
+    
+    // Alternating row background
+    if (index % 2 === 0) {
+      pdf.setFillColor(248, 248, 248);
+      pdf.rect(margin, currentY, contentWidth, rowHeight, "F");
+    }
+    
+    // Get status config
+    const rawStatus = row.cdeStatus;
+    const status = (rawStatus && STATUS_CONFIG[rawStatus]) ? rawStatus : "pending";
+    const statusConfig = STATUS_CONFIG[status];
+    
+    // Status badge
+    const badgeY = currentY + 6;
+    pdf.setFillColor(...statusConfig.bgColor);
+    pdf.roundedRect(colX.status + 4, badgeY, 20, 16, 3, 3, "F");
+    pdf.setFontSize(10);
+    pdf.setFont("helvetica", "bold");
+    pdf.setTextColor(...statusConfig.color);
+    pdf.text(statusConfig.label, colX.status + 14, badgeY + 11, { align: "center" });
+    
+    // Text content
+    pdf.setFontSize(8);
+    pdf.setFont("helvetica", "normal");
+    pdf.setTextColor(42, 42, 47);
+    
+    // Spec number
+    pdf.text(row.specNumber || "—", colX.spec + 4, currentY + 16);
+    
+    // Field name (wrapped)
+    let textY = currentY + 16;
+    fieldLines.forEach(line => {
+      pdf.text(line, colX.field + 4, textY);
+      textY += lineHeight;
+    });
+    
+    // Spec value (wrapped)
+    textY = currentY + 16;
+    specValueLines.forEach(line => {
+      pdf.text(line, colX.specValue + 4, textY);
+      textY += lineHeight;
+    });
+    
+    // Submittal value (wrapped)
+    textY = currentY + 16;
+    pdf.setTextColor(status === "not_found" ? 147 : 42, status === "not_found" ? 51 : 42, status === "not_found" ? 234 : 47);
+    submittalValueLines.forEach(line => {
+      pdf.text(line, colX.submittalValue + 4, textY);
+      textY += lineHeight;
+    });
+    
+    // Comment (wrapped)
+    textY = currentY + 16;
+    pdf.setTextColor(108, 108, 113);
+    pdf.setFont("helvetica", "italic");
+    commentLines.forEach(line => {
+      pdf.text(line, colX.comment + 4, textY);
+      textY += lineHeight;
+    });
+    
+    // Draw row border
+    pdf.setDrawColor(201, 203, 207);
+    pdf.setLineWidth(0.5);
+    pdf.line(margin, currentY + rowHeight, margin + contentWidth, currentY + rowHeight);
+    
+    currentY += rowHeight;
+  });
+  
+  // Draw table borders
+  pdf.setDrawColor(201, 203, 207);
+  pdf.setLineWidth(1);
+  pdf.rect(margin, margin + 20, contentWidth, currentY - margin - 20);
+  
+  // Draw column borders
+  Object.values(colX).forEach(x => {
+    pdf.line(x, margin + 20, x, currentY);
+  });
 }
 
 /**
