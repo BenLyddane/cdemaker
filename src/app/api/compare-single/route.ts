@@ -3,11 +3,12 @@ import { GoogleGenerativeAI, Part } from "@google/generative-ai";
 import type { ExtractedRow, CDEStatus, DocumentLocation } from "@/lib/types";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY || "");
-// Using gemini-3-pro-preview for better bounding box accuracy (same as extract route)
-const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
+// Using gemini-3-flash-preview for faster processing
+const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 500;
+const MAX_PAGES_TO_CHECK = 8; // Check up to 8 pages for better coverage
 
 interface PageImage {
   base64: string;
@@ -84,8 +85,8 @@ RESPOND WITH STRICT JSON:
 
 NOTE: boundingBox is REQUIRED when foundOnPage is not null. Always provide coordinates!`;
 
-    // Create image parts from submittal pages (limit to first 8 pages for single item)
-    const pagesToSend = submittalPages.slice(0, 8);
+    // Create image parts from submittal pages (limit to first 8 pages for better coverage)
+    const pagesToSend = submittalPages.slice(0, MAX_PAGES_TO_CHECK);
     const imageParts: Part[] = pagesToSend.map(page => ({
       inlineData: { data: page.base64, mimeType: page.mimeType },
     }));

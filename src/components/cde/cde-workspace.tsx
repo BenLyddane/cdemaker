@@ -175,12 +175,17 @@ export function CDEWorkspace() {
   // Process a single row with AI CDE
   const processRowWithAiCde = useCallback(async (row: ExtractedRow, submittalPages: PageData[]) => {
     try {
+      // Limit to first 8 pages to balance payload size vs coverage
+      // Page 1-2 are often cover/TOC, technical specs typically on pages 3-8
+      const MAX_SUBMITTAL_PAGES = 8;
+      const pagesToSend = submittalPages.slice(0, MAX_SUBMITTAL_PAGES);
+      
       const response = await fetch("/api/compare-single", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           specRow: row,
-          submittalPages: submittalPages.map(p => ({
+          submittalPages: pagesToSend.map(p => ({
             base64: p.base64,
             mimeType: p.mimeType,
             pageNumber: p.pageNumber,
