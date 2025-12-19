@@ -40,6 +40,8 @@ import {
   Layers,
   RotateCw,
   HelpCircle,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ExtractedRow, CDEStatus, SubmittalFinding } from "@/lib/types";
@@ -60,6 +62,7 @@ interface ExtractedDataPanelProps {
   isLoading: boolean;
   isAiCdeProcessing?: boolean;
   selectedRowId: string | null;
+  lockedRowId?: string | null; // Row ID that is locked for PDF review
   extractionProgress?: ExtractionProgress | null;
   hasSubmittal?: boolean;
   onPause?: () => void;
@@ -273,6 +276,7 @@ interface DataRowProps {
   row: ExtractedRow;
   isHovered: boolean;
   isSelected: boolean;
+  isLocked: boolean; // PDF view is locked to this row
   onHover: (hovered: boolean) => void;
   onSelect: () => void;
   onDelete?: () => void;
@@ -289,6 +293,7 @@ function DataRow({
   row,
   isHovered,
   isSelected,
+  isLocked,
   onHover,
   onSelect,
   onDelete,
@@ -334,11 +339,12 @@ function DataRow({
   return (
     <tr 
       className={cn(
-        "group cursor-pointer transition-colors",
-        isHovered && "bg-bv-blue-100/70",
-        isSelected && !isHovered && "bg-bv-blue-50",
-        row.isReviewed && !isHovered && !isSelected && "bg-green-50/30",
-        !isHovered && !isSelected && !row.isReviewed && "hover:bg-neutral-50"
+        "group cursor-pointer transition-colors relative",
+        isLocked && "bg-orange-50 ring-1 ring-inset ring-orange-300",
+        isHovered && !isLocked && "bg-bv-blue-100/70",
+        isSelected && !isHovered && !isLocked && "bg-bv-blue-50",
+        row.isReviewed && !isHovered && !isSelected && !isLocked && "bg-green-50/30",
+        !isHovered && !isSelected && !row.isReviewed && !isLocked && "hover:bg-neutral-50"
       )}
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
@@ -346,25 +352,33 @@ function DataRow({
     >
       {/* Spec Number */}
       <td className="px-3 py-2.5 text-detail text-neutral-500">
-        {row.specNumber ? (
-          <HoverCard openDelay={200} closeDelay={100}>
-            <HoverCardTrigger asChild>
-              <div className="flex items-center gap-1.5 cursor-help">
-                <Hash className="h-3 w-3 flex-shrink-0 text-bv-blue-400" />
-                <span className="font-mono text-detail text-neutral-700 whitespace-nowrap">
+        <div className="flex items-center gap-1.5">
+          {/* Lock indicator */}
+          {isLocked && (
+            <span title="PDF locked - click to unlock">
+              <Lock className="h-3.5 w-3.5 flex-shrink-0 text-orange-500" />
+            </span>
+          )}
+          {row.specNumber ? (
+            <HoverCard openDelay={200} closeDelay={100}>
+              <HoverCardTrigger asChild>
+                <div className="flex items-center gap-1.5 cursor-help">
+                  {!isLocked && <Hash className="h-3 w-3 flex-shrink-0 text-bv-blue-400" />}
+                  <span className="font-mono text-detail text-neutral-700 whitespace-nowrap">
+                    {row.specNumber}
+                  </span>
+                </div>
+              </HoverCardTrigger>
+              <HoverCardContent className="w-auto max-w-[400px] p-2" align="start">
+                <div className="font-mono text-detail text-neutral-800">
                   {row.specNumber}
-                </span>
-              </div>
-            </HoverCardTrigger>
-            <HoverCardContent className="w-auto max-w-[400px] p-2" align="start">
-              <div className="font-mono text-detail text-neutral-800">
-                {row.specNumber}
-              </div>
-            </HoverCardContent>
-          </HoverCard>
-        ) : (
-          <span className="text-neutral-300">—</span>
-        )}
+                </div>
+              </HoverCardContent>
+            </HoverCard>
+          ) : (
+            <span className="text-neutral-300">—</span>
+          )}
+        </div>
       </td>
       
       {/* Field */}
@@ -768,6 +782,7 @@ export function ExtractedDataPanel({
   isLoading,
   isAiCdeProcessing = false,
   selectedRowId,
+  lockedRowId = null,
   extractionProgress,
   hasSubmittal = false,
   onPause,
@@ -1208,6 +1223,7 @@ export function ExtractedDataPanel({
                 row={row}
                 isHovered={hoveredRowId === row.id}
                 isSelected={selectedRowId === row.id}
+                isLocked={lockedRowId === row.id}
                 onHover={(hovered) => onRowHover(hovered ? row : null)}
                 onSelect={() => onRowSelect(row)}
                 onDelete={onRowDelete ? () => onRowDelete(row.id) : undefined}

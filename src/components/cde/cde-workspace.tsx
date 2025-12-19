@@ -147,6 +147,7 @@ export function CDEWorkspace() {
   const [selectedComparison, setSelectedComparison] = useState<string | null>(null);
   const [hoveredExtractedRow, setHoveredExtractedRow] = useState<ExtractedRow | null>(null);
   const [selectedExtractedRow, setSelectedExtractedRow] = useState<ExtractedRow | null>(null);
+  const [isRowLocked, setIsRowLocked] = useState(false); // Lock PDF view to selected row
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [splitView, setSplitView] = useState(true); // Default to split view when submittal exists
   const [viewingDocument, setViewingDocument] = useState<"spec" | "submittal">("spec");
@@ -1055,6 +1056,12 @@ export function CDEWorkspace() {
   // Handle extracted row hover (for PDF highlighting)
   const handleExtractedRowHover = useCallback((row: ExtractedRow | null) => {
     setHoveredExtractedRow(row);
+    
+    // If a row is locked, don't update PDF view on hover
+    if (isRowLocked && selectedExtractedRow) {
+      return;
+    }
+    
     if (row) {
       // Find which document this row is from
       for (const doc of specDocuments) {
@@ -1074,11 +1081,20 @@ export function CDEWorkspace() {
         }
       }
     }
-  }, [specDocuments, documentExtractions, viewingDocId]);
+  }, [specDocuments, documentExtractions, viewingDocId, isRowLocked, selectedExtractedRow]);
   
-  // Handle extracted row select
+  // Handle extracted row select - clicking locks the row, clicking again unlocks
   const handleExtractedRowSelect = useCallback((row: ExtractedRow) => {
+    // If clicking the same row that's already locked, unlock it
+    if (selectedExtractedRow?.id === row.id && isRowLocked) {
+      setIsRowLocked(false);
+      return;
+    }
+    
+    // Select and lock the new row
     setSelectedExtractedRow(row);
+    setIsRowLocked(true);
+    
     // Find which document this row is from and navigate
     for (const doc of specDocuments) {
       const extraction = documentExtractions.get(doc.id);
@@ -1094,7 +1110,7 @@ export function CDEWorkspace() {
         break;
       }
     }
-  }, [specDocuments, documentExtractions]);
+  }, [specDocuments, documentExtractions, selectedExtractedRow, isRowLocked]);
   
   // Delete extracted row
   const handleDeleteExtractedRow = useCallback((rowId: string) => {
@@ -1384,7 +1400,9 @@ export function CDEWorkspace() {
   const highlightData = useMemo(() => {
     // If we're in review mode and have a hovered/selected row
     if (workflowPhase === "reviewing" || workflowPhase === "upload" || workflowPhase === "extracting") {
-      const row = hoveredExtractedRow || selectedExtractedRow;
+      // When locked, always use the selected row (ignore hover)
+      // When not locked, prefer hover over selected
+      const row = isRowLocked ? selectedExtractedRow : (hoveredExtractedRow || selectedExtractedRow);
       if (row) {
         return {
           type: "extracted" as const,
@@ -1402,7 +1420,7 @@ export function CDEWorkspace() {
       };
     }
     return null;
-  }, [workflowPhase, hoveredExtractedRow, selectedExtractedRow, selectedComparisonData]);
+  }, [workflowPhase, hoveredExtractedRow, selectedExtractedRow, selectedComparisonData, isRowLocked]);
   
   const isProcessing = isExtracting || isComparing;
   const currentPhase = determineWorkflowPhase();
@@ -1775,6 +1793,7 @@ export function CDEWorkspace() {
                 rows={allExtractedRows}
                 hoveredRowId={hoveredExtractedRow?.id || null}
                 selectedRowId={selectedExtractedRow?.id || null}
+                lockedRowId={isRowLocked ? selectedExtractedRow?.id || null : null}
                 onRowHover={handleExtractedRowHover}
                 onRowSelect={handleExtractedRowSelect}
                 onRowDelete={handleDeleteExtractedRow}
